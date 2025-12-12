@@ -1,4 +1,5 @@
 import random
+from pathlib import Path
 import pygame
 from config import (
     SCREEN_WIDTH, SCREEN_HEIGHT, FPS,
@@ -145,6 +146,12 @@ class Game:
 
         # Wall collision ends game
         if head_x < 0 or head_x >= GRID_WIDTH or head_y < 0 or head_y >= GRID_HEIGHT:
+            self.play_sound("death")
+            self.running = False
+            return
+
+        if (head_x, head_y) in self.wall_positions:
+            self.play_sound("death")
             self.running = False
             return
 
