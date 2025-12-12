@@ -4,12 +4,12 @@ import pygame
 from config import (
     SCREEN_WIDTH, SCREEN_HEIGHT, FPS,
     DEFAULT_FONT, GRID_WIDTH, GRID_HEIGHT, TILE_SIZE,
-    COLOR_BUTTON, COLOR_KEY, COLOR_HUD, COLOR_WALL, ASSET_DIR,
+    COLOR_BUTTON, COLOR_KEY, COLOR_HUD, COLOR_WALL
 )
 from grid import draw_grid, build_background
 from snake import Snake
 from food import Food
-from config import load_scaled_image, load_sound
+from config import load_scaled_image
 
 
 class Game:
@@ -33,89 +33,8 @@ class Game:
         self.key_image = load_scaled_image("key.png", (TILE_SIZE, TILE_SIZE))
         self.start_bg = load_scaled_image("bg.png", (SCREEN_WIDTH, SCREEN_HEIGHT))
 
-        # Audio
-        self.audio_enabled = self.init_audio()
-        self.start_music_path: Path | None = None
-        self.level_music_paths: list[Path] = []
-        self.current_music_path: Path | None = None
-        self.sounds: dict[str, pygame.mixer.Sound | None] = {}
-        self.load_audio_assets()
-        self.play_start_music()
-
         self.game_started = False
         self.start_time_ms: int | None = None
-
-    # -- Audio helpers ---------------------------------------------------
-    def init_audio(self) -> bool:
-        try:
-            pygame.mixer.init()
-        except pygame.error:
-            return False
-        return True
-
-    def load_audio_assets(self):
-        if not self.audio_enabled:
-            return
-
-        # Music
-        self.start_music_path = self._music_path("start.ogg")
-        for name in ("level1.ogg", "level2.ogg", "level3.ogg"):
-            path = self._music_path(name)
-            if path:
-                self.level_music_paths.append(path)
-
-        # Sound effects
-        self.sounds = {
-            "eat": load_sound("eat.wav", volume=0.6),
-            "key": load_sound("key.wav", volume=0.8),
-            "start": load_sound("start.wav", volume=0.8),
-            "death": load_sound("snakesplosion.wav", volume=0.9),
-        }
-
-    def _music_path(self, filename: str) -> Path | None:
-        path = ASSET_DIR / filename
-        return path if path.exists() else None
-
-    def play_music(self, path: Path | None, *, loop: bool = True):
-        if not self.audio_enabled or path is None:
-            return
-        try:
-            pygame.mixer.music.load(path)
-            pygame.mixer.music.play(-1 if loop else 0)
-            self.current_music_path = path
-        except pygame.error:
-            pass
-
-    def stop_music(self):
-        if not self.audio_enabled:
-            return
-        try:
-            pygame.mixer.music.stop()
-        except pygame.error:
-            pass
-
-    def play_start_music(self):
-        if self.current_music_path == self.start_music_path:
-            return
-        self.play_music(self.start_music_path, loop=True)
-
-    def set_music_for_level(self):
-        if not self.level_music_paths:
-            return
-        index = ((self.level - 1) // 5) % len(self.level_music_paths)
-        target = self.level_music_paths[index]
-        if self.current_music_path != target:
-            self.play_music(target, loop=True)
-
-    def play_sound(self, key: str):
-        if not self.audio_enabled:
-            return
-        sound = self.sounds.get(key)
-        if sound:
-            try:
-                sound.play()
-            except pygame.error:
-                pass
 
     def start_level(self):
         """Set up a fresh level layout with increasing gate spacing."""
@@ -126,7 +45,6 @@ class Game:
         self.spawn_food()
         self.transition_timer = 0
         self.transition_text = ""
-        self.set_music_for_level()
 
     def start_game(self):
         """Begin a new run from the start screen."""
@@ -134,8 +52,6 @@ class Game:
         self.points = 0
         self.game_started = True
         self.start_time_ms = pygame.time.get_ticks()
-        self.stop_music()
-        self.play_sound("start")
         self.start_level()
 
     def build_walls(self):
@@ -237,6 +153,10 @@ class Game:
         if (head_x, head_y) in self.wall_positions:
             self.play_sound("death")
             self.running = False
+            return
+
+        if (head_x, head_y) in self.wall_positions:
+            self.running = False
 
         # TODO: self-collision later
 
@@ -244,7 +164,6 @@ class Game:
         if self.snake.head == self.food.position:
             self.snake.grow(1)
             self.points += 1
-            self.play_sound("eat")
             self.spawn_food()
 
     def check_key_reached(self):
@@ -259,7 +178,6 @@ class Game:
         self.transition_text = f"Level {self.level} complete!"
         self.level += 1
         self.transition_timer = FPS // 2
-        self.play_sound("key")
 
     def draw(self):
         if not self.game_started:
@@ -332,7 +250,6 @@ class Game:
             self.screen.blit(text_surf, text_rect)
 
     def draw_start_screen(self):
-        self.play_start_music()
         if self.start_bg:
             self.screen.blit(self.start_bg, (0, 0))
         else:

@@ -1,37 +1,36 @@
-# SnakeQuest Local IDE Quickstart
+# SnakeQuest IDE Setup Guide
 
-A short, copy/paste-friendly guide to run SnakeQuest in common local IDEs or straight from the terminal.
+This guide covers running the game locally in common IDEs (PyCharm, VS Code) and from the command line.
 
-## 1) Prerequisites
-- **Python**: 3.10+ recommended.
-- **Dependencies**: `pygame` (game loop & rendering).
-- **Optional assets**: Add your own `bg.png`, `key.png`, sprite files, and audio (`start.ogg`, `level1.ogg`-`level3.ogg`, `eat.wav`, `key.wav`, `start.wav`, `snakesplosion.wav`) into `assets/` to override the procedural fallback art and sound.
+## Requirements
+- Python 3.10+ (recommended).
+- `pygame` installed in your environment:
+  ```bash
+  python -m pip install --upgrade pip
+  pip install pygame
+  ```
+- Optional assets in `assets/` for richer visuals (e.g., `bg.png`, `key.png`); the game will fall back to procedural graphics when files are missing.
 
-## 2) Clone and prepare an environment
-```bash
-# Clone and enter the project
-git clone <your-fork-url> SnakeQuest
-cd SnakeQuest
+## Project layout
+- `main.py` — entry point that launches the `Game` loop.
+- `game.py`, `snake.py`, `food.py`, `grid.py`, `config.py` — game logic, rendering, and configuration.
+- `assets/` — optional art used when present.
 
-# Create and activate a virtual environment (recommended)
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
-
-# Install requirements
-python -m pip install --upgrade pip
-pip install pygame
-```
-
-## 3) Run from the terminal
+## Running from the command line
 ```bash
 python main.py
 ```
-Controls: press **Space** on the start screen, then use **Arrow keys** or **WASD** to steer. The HUD shows score, level, timer, and points carried across levels.
+Press **Space** on the start screen to begin. Use **Arrow keys** or **WASD** to move. The HUD shows score, level, and elapsed time.
 
-## 4) VS Code setup
-1. **Open folder**: File → Open Folder… and choose the repo.
-2. **Interpreter**: Command Palette → "Python: Select Interpreter" → pick `.venv` (or create it via the steps above).
-3. **Debug config**: Run and Debug → "create a launch.json" → Python → replace the generated entry with:
+## VS Code setup
+1. Open the folder in VS Code.
+2. Create or select a Python interpreter (Command Palette → "Python: Select Interpreter"). A venv in `.venv/` keeps dependencies isolated:
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
+   pip install pygame
+   ```
+3. Add a minimal debug configuration (Run and Debug → "create a launch.json" → Python) similar to:
    ```json
    {
      "version": "0.2.0",
@@ -47,22 +46,21 @@ Controls: press **Space** on the start screen, then use **Arrow keys** or **WASD
      ]
    }
    ```
-4. **Start**: press **F5**. The game launches in the integrated terminal with live stdout/stderr.
+4. Start debugging with **F5**; VS Code will launch `main.py` in the integrated terminal.
 
-## 5) PyCharm setup
-1. **Open project**: Open the repo directory.
-2. **Interpreter**: When prompted, create/attach a virtualenv (File → Settings → Project → Python Interpreter). Install `pygame` if PyCharm offers to auto-install requirements.
-3. **Run configuration**: Run → Edit Configurations… → **+** → Python, then set:
-   - **Script path**: `<project-root>/main.py`
-   - **Working directory**: `<project-root>`
-   - **Interpreter**: the venv from step 2
-4. **Run/Debug**: click the green Run or Debug arrow to start the game.
+## PyCharm setup
+1. Open the project directory in PyCharm.
+2. When prompted, create a new virtual environment for the project and install dependencies:
+   ```bash
+   pip install pygame
+   ```
+3. Create a Run/Debug Configuration:
+   - Script path: `<project root>/main.py`
+   - Working directory: `<project root>`
+   - Python interpreter: the venv created in step 2
+4. Click **Run** or **Debug** to start the game. PyCharm will display stdout/stderr in its Run tool window.
 
-## 6) Troubleshooting
-- If you see `ModuleNotFoundError: pygame`, confirm the virtual environment is active and rerun `pip install pygame`.
-- If the window opens off-screen or is too large, lower `SCREEN_WIDTH`/`SCREEN_HEIGHT` in `config.py`.
-- Missing art files are fine—the game falls back to neon placeholders. Drop custom PNGs into `assets/` to customize visuals.
-- Missing audio is also fine. Add the optional files listed above to hear music on the start screen, rotating in-level tracks every 5 levels, and sound effects for eating, level gates, starting, and the snakesplosion on death.
-- On macOS, allow the Python app to accept keyboard input if macOS prompts for accessibility permissions.
-
-Enjoy hacking on SnakeQuest!
+## Tips
+- If the window opens off-screen or at an unexpected size, adjust `SCREEN_WIDTH`/`SCREEN_HEIGHT` in `config.py`.
+- When adding new art, keep file names consistent; missing files automatically fall back to procedural sprites.
+- Use the built-in timer and score display to verify timing and level progression during testing.
