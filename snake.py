@@ -1,5 +1,5 @@
 import pygame
-from config import TILE_SIZE, COLOR_SNAKE
+from config import TILE_SIZE, COLOR_SNAKE, load_scaled_image
 
 
 class Snake:
@@ -14,13 +14,13 @@ class Snake:
         # Growth
         self.grow_pending = 0
 
-        # Placeholder PNG-style sprites
-        self.head_frames = self._create_head_frames()
+        # Placeholder PNG-style sprites (fallback when assets are missing)
+        self.head_frames = self._load_head_frames() or self._create_head_frames()
         self.anim_index = 0
 
-        # Body image placeholder (acts like a PNG segment)
-        self.body_image = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
-        self.body_image.fill(COLOR_SNAKE)
+        # Body and tail images (fallback to simple colored blocks)
+        self.body_image = self._load_body_image()
+        self.tail_image = self._load_tail_image()
 
         # Fade-in animation for growing segments
         # Each entry: {"pos": (x, y), "alpha": int}
@@ -42,6 +42,34 @@ class Snake:
 
             frames.append(surf)
         return frames
+
+    def _load_head_frames(self):
+        """Try loading a single head PNG and return as frames list."""
+
+        image = load_scaled_image("head.png", (TILE_SIZE, TILE_SIZE))
+        return [image] if image is not None else []
+
+    def _load_body_image(self) -> pygame.Surface:
+        """Load a body PNG or build a simple colored block fallback."""
+
+        image = load_scaled_image("segment.png", (TILE_SIZE, TILE_SIZE))
+        if image is not None:
+            return image
+
+        placeholder = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+        placeholder.fill(COLOR_SNAKE)
+        return placeholder
+
+    def _load_tail_image(self) -> pygame.Surface:
+        """Load a tail PNG or reuse the body placeholder."""
+
+        image = load_scaled_image("tail.png", (TILE_SIZE, TILE_SIZE))
+        if image is not None:
+            return image
+
+        placeholder = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+        placeholder.fill(COLOR_SNAKE)
+        return placeholder
 
     @property
     def head(self):
@@ -99,20 +127,46 @@ class Snake:
         for index, (x, y) in enumerate(self.segments):
             dest = (x * TILE_SIZE, y * TILE_SIZE)
 
-            if index == 0:
-                # Head with chew animation
-                frame = self.head_frames[self.anim_index]
-                surface.blit(frame, dest)
-            else:
-                # Fade-in body segments
-                fade_entry = next(
-                    (seg for seg in self.fading_segments if seg["pos"] == (x, y)),
-                    None
-                )
+            # Determine fade overlay
+            fade_entry = next(
+                (seg for seg in self.fading_segments if seg["pos"] == (x, y)),
+                None,
+            )
 
-                if fade_entry:
-                    self.body_image.set_alpha(fade_entry["alpha"])
-                    surface.blit(self.body_image, dest)
-                    self.body_image.set_alpha(255)
-                else:
-                    surface.blit(self.body_image, dest)
+            if index == 0:
+                # Head with chew animation and rotation
+                frame = self.head_frames[self.anim_index]
+                angle = self._direction_to_angle(self.direction)
+                oriented = pygame.transform.rotate(frame, angle) if frame else frame
+                self._blit_with_fade(surface, oriented, dest, fade_entry)
+            elif index == len(self.segments) - 1:
+                # Tail pointing toward previous segment
+                prev_x, prev_y = self.segments[index - 1]
+                dx, dy = x - prev_x, y - prev_y
+                angle = self._direction_to_angle((dx, dy))
+                oriented = pygame.transform.rotate(self.tail_image, angle)
+                self._blit_with_fade(surface, oriented, dest, fade_entry)
+            else:
+                oriented = self.body_image
+                self._blit_with_fade(surface, oriented, dest, fade_entry)
+
+    def _blit_with_fade(self, surface: pygame.Surface, image: pygame.Surface, dest, fade_entry):
+        if fade_entry:
+            image.set_alpha(fade_entry["alpha"])
+            surface.blit(image, dest)
+            image.set_alpha(255)
+        else:
+            surface.blit(image, dest)
+
+    @staticmethod
+    def _direction_to_angle(direction: tuple[int, int]) -> int:
+        dx, dy = direction
+        if dx == 1 and dy == 0:
+            return 0
+        if dx == -1 and dy == 0:
+            return 180
+        if dx == 0 and dy == -1:
+            return 90
+        if dx == 0 and dy == 1:
+            return -90
+        return 0
