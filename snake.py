@@ -124,20 +124,46 @@ class Snake:
         for index, (x, y) in enumerate(self.segments):
             dest = (x * TILE_SIZE, y * TILE_SIZE)
 
-            if index == 0:
-                # Head with chew animation
-                frame = self.head_frames[self.anim_index]
-                surface.blit(frame, dest)
-            else:
-                # Fade-in body segments
-                fade_entry = next(
-                    (seg for seg in self.fading_segments if seg["pos"] == (x, y)),
-                    None
-                )
+            # Determine fade overlay
+            fade_entry = next(
+                (seg for seg in self.fading_segments if seg["pos"] == (x, y)),
+                None,
+            )
 
-                if fade_entry:
-                    self.body_image.set_alpha(fade_entry["alpha"])
-                    surface.blit(self.body_image, dest)
-                    self.body_image.set_alpha(255)
-                else:
-                    surface.blit(self.body_image, dest)
+            if index == 0:
+                # Head with chew animation and rotation
+                frame = self.head_frames[self.anim_index]
+                angle = self._direction_to_angle(self.direction)
+                oriented = pygame.transform.rotate(frame, angle) if frame else frame
+                self._blit_with_fade(surface, oriented, dest, fade_entry)
+            elif index == len(self.segments) - 1:
+                # Tail pointing toward previous segment
+                prev_x, prev_y = self.segments[index - 1]
+                dx, dy = x - prev_x, y - prev_y
+                angle = self._direction_to_angle((dx, dy))
+                oriented = pygame.transform.rotate(self.tail_image, angle)
+                self._blit_with_fade(surface, oriented, dest, fade_entry)
+            else:
+                oriented = self.body_image
+                self._blit_with_fade(surface, oriented, dest, fade_entry)
+
+    def _blit_with_fade(self, surface: pygame.Surface, image: pygame.Surface, dest, fade_entry):
+        if fade_entry:
+            image.set_alpha(fade_entry["alpha"])
+            surface.blit(image, dest)
+            image.set_alpha(255)
+        else:
+            surface.blit(image, dest)
+
+    @staticmethod
+    def _direction_to_angle(direction: tuple[int, int]) -> int:
+        dx, dy = direction
+        if dx == 1 and dy == 0:
+            return 0
+        if dx == -1 and dy == 0:
+            return 180
+        if dx == 0 and dy == -1:
+            return 90
+        if dx == 0 and dy == 1:
+            return -90
+        return 0
