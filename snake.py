@@ -18,9 +18,8 @@ class Snake:
         self.head_frames = self._load_head_frames() or self._create_head_frames()
         self.anim_index = 0
 
-        # Body and tail images (fallback to simple colored blocks)
+        # Body image placeholder (acts like a PNG segment)
         self.body_image = self._load_body_image()
-        self.tail_image = self._load_tail_image()
 
         # Fade-in animation for growing segments
         # Each entry: {"pos": (x, y), "alpha": int}
@@ -44,26 +43,24 @@ class Snake:
         return frames
 
     def _load_head_frames(self):
-        """Try loading a single head PNG and return as frames list."""
+        """Try loading head animation frames from disk.
 
-        image = load_scaled_image("head.png", (TILE_SIZE, TILE_SIZE))
-        return [image] if image is not None else []
+        Returns an empty list when the PNGs are not available so callers can
+        gracefully fall back to generated placeholders.
+        """
+
+        frames = []
+        for i in range(3):
+            image = load_scaled_image(f"snake_head_{i}.png", (TILE_SIZE, TILE_SIZE))
+            if image is None:
+                return []
+            frames.append(image)
+        return frames
 
     def _load_body_image(self) -> pygame.Surface:
         """Load a body PNG or build a simple colored block fallback."""
 
-        image = load_scaled_image("segment.png", (TILE_SIZE, TILE_SIZE))
-        if image is not None:
-            return image
-
-        placeholder = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
-        placeholder.fill(COLOR_SNAKE)
-        return placeholder
-
-    def _load_tail_image(self) -> pygame.Surface:
-        """Load a tail PNG or reuse the body placeholder."""
-
-        image = load_scaled_image("tail.png", (TILE_SIZE, TILE_SIZE))
+        image = load_scaled_image("snake_body.png", (TILE_SIZE, TILE_SIZE))
         if image is not None:
             return image
 
