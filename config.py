@@ -43,23 +43,3 @@ def load_scaled_image(filename: str, size: tuple[int, int]):
         return None
 
     return pygame.transform.smoothscale(image, size)
-
-
-def load_sound(filename: str, volume: float | None = None):
-    """Load a sound effect from assets, returning ``None`` if missing.
-
-    The helper quietly ignores missing files or mixer errors so the game can
-    run without audio assets present. An optional ``volume`` value between
-    ``0.0`` and ``1.0`` is applied when the sound loads successfully.
-    """
-
-    path = ASSET_DIR / filename
-    try:
-        sound = pygame.mixer.Sound(path)
-    except (FileNotFoundError, pygame.error):
-        return None
-
-    if volume is not None:
-        sound.set_volume(max(0.0, min(1.0, volume)))
-
-    return sound
