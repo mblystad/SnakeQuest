@@ -44,6 +44,8 @@ PIXEL_FONT_NAMES = (
     "Pixel Operator",
     "Pixeled",
 )
+MENU_FONT_FILE = "Vipnagorgialla_Bd.otf"
+UI_FONT_FILE = "Vipnagorgialla_Rg.otf"
 
 
 def load_pixel_font(size: int) -> pygame.font.Font:
@@ -68,6 +70,21 @@ def load_pixel_font(size: int) -> pygame.font.Font:
 
 
 DEFAULT_FONT = load_pixel_font(24)
+
+
+def load_custom_font(filename: str, size: int) -> pygame.font.Font:
+    """Load a specific font file with pixel fallback."""
+    search_dirs = (ASSET_DIR, FALLBACK_ASSET_DIR)
+    for base_dir in search_dirs:
+        path = base_dir / filename
+        if not path.exists():
+            continue
+        try:
+            return pygame.font.Font(path, size)
+        except (FileNotFoundError, pygame.error):
+            continue
+
+    return load_pixel_font(size)
 
 
 def load_scaled_image(filename: str, size: tuple[int, int]):

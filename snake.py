@@ -168,7 +168,7 @@ class Snake:
             if index == 0:
                 # Head with chew animation and rotation
                 frame = self.head_frames[self.anim_index]
-                angle = self._direction_to_angle(self.direction)
+                angle = self._direction_to_angle(self.pending_direction)
                 oriented = pygame.transform.rotate(frame, angle) if frame else frame
                 self._blit_with_fade(surface, oriented, dest, fade_entry)
             elif index == len(self.segments) - 1:
