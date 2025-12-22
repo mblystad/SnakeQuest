@@ -18,8 +18,10 @@ class Snake:
         self.head_frames = self._load_head_frames() or self._create_head_frames()
         self.anim_index = 0
 
-        # Body image placeholder (acts like a PNG segment)
+        # Body and tail images (fallback to solid blocks when assets are missing)
         self.body_image = self._load_body_image()
+        self.throat_image = self._load_throat_image()
+        self.tail_image = self._load_tail_image()
 
         # Fade-in animation for growing segments
         # Each entry: {"pos": (x, y), "alpha": int}
@@ -53,14 +55,43 @@ class Snake:
         for i in range(3):
             image = load_scaled_image(f"snake_head_{i}.png", (TILE_SIZE, TILE_SIZE))
             if image is None:
-                return []
+                frames = []
+                break
             frames.append(image)
-        return frames
+        if frames:
+            return frames
+
+        single = load_scaled_image("head.png", (TILE_SIZE, TILE_SIZE))
+        if single is not None:
+            return [single]
+
+        return []
 
     def _load_body_image(self) -> pygame.Surface:
         """Load a body PNG or build a simple colored block fallback."""
 
-        image = load_scaled_image("snake_body.png", (TILE_SIZE, TILE_SIZE))
+        for filename in ("segment.png", "snake_body.png"):
+            image = load_scaled_image(filename, (TILE_SIZE, TILE_SIZE))
+            if image is not None:
+                return image
+
+        placeholder = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+        placeholder.fill(COLOR_SNAKE)
+        return placeholder
+
+    def _load_throat_image(self) -> pygame.Surface:
+        """Load the throat/neck PNG or fall back to the body image."""
+
+        image = load_scaled_image("throat.png", (TILE_SIZE, TILE_SIZE))
+        if image is not None:
+            return image
+
+        return self.body_image
+
+    def _load_tail_image(self) -> pygame.Surface:
+        """Load a tail PNG or build a simple colored block fallback."""
+
+        image = load_scaled_image("tail.png", (TILE_SIZE, TILE_SIZE))
         if image is not None:
             return image
 
@@ -94,7 +125,8 @@ class Snake:
     def update(self):
         """Move the snake and update animations."""
         # Advance chew animation
-        self.anim_index = (self.anim_index + 1) % len(self.head_frames)
+        if self.head_frames:
+            self.anim_index = (self.anim_index + 1) % len(self.head_frames)
 
         # Apply movement
         self.direction = self.pending_direction
@@ -120,13 +152,16 @@ class Snake:
             if seg["alpha"] < 255
         ]
 
-    def draw(self, surface: pygame.Surface):
-        for index, (x, y) in enumerate(self.segments):
-            dest = (x * TILE_SIZE, y * TILE_SIZE)
+    def draw(self, surface: pygame.Surface, offset_y: int = 0, alpha: float = 0.0):
+        alpha = max(0.0, min(1.0, alpha))
+        positions = self._interpolated_positions(alpha) if alpha > 0 else list(self.segments)
+        positions = positions[: len(self.segments)]
+        for index, (x, y) in enumerate(positions):
+            dest = (int(round(x * TILE_SIZE)), int(round(y * TILE_SIZE + offset_y)))
 
             # Determine fade overlay
             fade_entry = next(
-                (seg for seg in self.fading_segments if seg["pos"] == (x, y)),
+                (seg for seg in self.fading_segments if seg["pos"] == (int(round(x)), int(round(y)))),
                 None,
             )
 
@@ -138,14 +173,42 @@ class Snake:
                 self._blit_with_fade(surface, oriented, dest, fade_entry)
             elif index == len(self.segments) - 1:
                 # Tail pointing toward previous segment
+                cur_x, cur_y = self.segments[index]
                 prev_x, prev_y = self.segments[index - 1]
-                dx, dy = x - prev_x, y - prev_y
+                dx, dy = cur_x - prev_x, cur_y - prev_y
                 angle = self._direction_to_angle((dx, dy))
                 oriented = pygame.transform.rotate(self.tail_image, angle)
                 self._blit_with_fade(surface, oriented, dest, fade_entry)
             else:
-                oriented = self.body_image
+                angle = self._body_angle(index)
+                segment_image = self.throat_image if index == 1 else self.body_image
+                oriented = pygame.transform.rotate(segment_image, angle)
                 self._blit_with_fade(surface, oriented, dest, fade_entry)
+
+    def _interpolated_positions(self, alpha: float) -> list[tuple[float, float]]:
+        current = list(self.segments)
+        predicted = self._predict_next_segments()
+
+        if len(predicted) > len(current):
+            current.extend([current[-1]] * (len(predicted) - len(current)))
+        elif len(predicted) < len(current):
+            predicted.extend([predicted[-1]] * (len(current) - len(predicted)))
+
+        interpolated = []
+        for (x1, y1), (x2, y2) in zip(current, predicted):
+            ix = x1 + (x2 - x1) * alpha
+            iy = y1 + (y2 - y1) * alpha
+            interpolated.append((ix, iy))
+        return interpolated
+
+    def _predict_next_segments(self) -> list[tuple[int, int]]:
+        head_x, head_y = self.head
+        dx, dy = self.pending_direction
+        new_head = (head_x + dx, head_y + dy)
+        predicted = [new_head] + self.segments[:]
+        if self.grow_pending <= 0:
+            predicted.pop()
+        return predicted
 
     def _blit_with_fade(self, surface: pygame.Surface, image: pygame.Surface, dest, fade_entry):
         if fade_entry:
@@ -167,3 +230,21 @@ class Snake:
         if dx == 0 and dy == 1:
             return -90
         return 0
+
+    def _body_angle(self, index: int) -> int:
+        """Rotate a body segment to match its neighboring segments."""
+        prev_x, prev_y = self.segments[index - 1]
+        next_x, next_y = self.segments[index + 1]
+        x, y = self.segments[index]
+
+        dx1, dy1 = prev_x - x, prev_y - y
+        dx2, dy2 = next_x - x, next_y - y
+
+        # Straight segment: align with its axis based on the previous segment.
+        if dx1 == dx2 and dx1 == 0:
+            return self._direction_to_angle((0, dy1))
+        if dy1 == dy2 and dy1 == 0:
+            return self._direction_to_angle((dx1, 0))
+
+        # Corner segment: fall back to the previous direction.
+        return self._direction_to_angle((dx1, dy1))

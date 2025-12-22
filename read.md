@@ -4,10 +4,10 @@ This guide covers running the game locally in common IDEs (PyCharm, VS Code) and
 
 ## Requirements
 - Python 3.10+ (recommended).
-- `pygame` installed in your environment:
+- `pygame-ce` installed in your environment (drop-in replacement for pygame):
   ```bash
   python -m pip install --upgrade pip
-  pip install pygame
+  pip install pygame-ce
   ```
 - Optional assets in `assets/` for richer visuals (e.g., `bg.png`, `key.png`); the game will fall back to procedural graphics when files are missing.
 
@@ -28,7 +28,7 @@ Press **Space** on the start screen to begin. Use **Arrow keys** or **WASD** to 
    ```bash
    python -m venv .venv
    source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
-   pip install pygame
+   pip install pygame-ce
    ```
 3. Add a minimal debug configuration (Run and Debug → "create a launch.json" → Python) similar to:
    ```json
@@ -52,7 +52,7 @@ Press **Space** on the start screen to begin. Use **Arrow keys** or **WASD** to 
 1. Open the project directory in PyCharm.
 2. When prompted, create a new virtual environment for the project and install dependencies:
    ```bash
-   pip install pygame
+   pip install pygame-ce
    ```
 3. Create a Run/Debug Configuration:
    - Script path: `<project root>/main.py`

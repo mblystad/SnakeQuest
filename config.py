@@ -7,7 +7,9 @@ GRID_WIDTH = 36
 GRID_HEIGHT = 24
 
 SCREEN_WIDTH = GRID_WIDTH * TILE_SIZE
-SCREEN_HEIGHT = GRID_HEIGHT * TILE_SIZE
+PLAYFIELD_HEIGHT = GRID_HEIGHT * TILE_SIZE
+HUD_HEIGHT = 70
+SCREEN_HEIGHT = PLAYFIELD_HEIGHT + HUD_HEIGHT
 
 FPS = 10
 
@@ -23,10 +25,49 @@ COLOR_KEY = (255, 119, 208)
 COLOR_HUD = (240, 225, 255)
 
 pygame.font.init()
-DEFAULT_FONT = pygame.font.SysFont("consolas", 20)
 
 # Assets
 ASSET_DIR = Path(__file__).parent / "assets"
+FALLBACK_ASSET_DIR = Path(__file__).parent
+
+PIXEL_FONT_FILES = (
+    "PressStart2P-Regular.ttf",
+    "pressstart2p.ttf",
+    "8bit.ttf",
+    "pixel.ttf",
+)
+PIXEL_FONT_NAMES = (
+    "Press Start 2P",
+    "PressStart2P",
+    "Pixel Emulator",
+    "VT323",
+    "Pixel Operator",
+    "Pixeled",
+)
+
+
+def load_pixel_font(size: int) -> pygame.font.Font:
+    """Load an 8-bit style font with graceful fallbacks."""
+    search_dirs = (ASSET_DIR, FALLBACK_ASSET_DIR)
+    for base_dir in search_dirs:
+        for filename in PIXEL_FONT_FILES:
+            path = base_dir / filename
+            if not path.exists():
+                continue
+            try:
+                return pygame.font.Font(path, size)
+            except (FileNotFoundError, pygame.error):
+                continue
+
+    for name in PIXEL_FONT_NAMES:
+        font = pygame.font.SysFont(name, size)
+        if font:
+            return font
+
+    return pygame.font.SysFont("consolas", size)
+
+
+DEFAULT_FONT = load_pixel_font(24)
 
 
 def load_scaled_image(filename: str, size: tuple[int, int]):
@@ -36,10 +77,20 @@ def load_scaled_image(filename: str, size: tuple[int, int]):
     gracefully fall back to procedural placeholders.
     """
 
-    path = ASSET_DIR / filename
-    try:
-        image = pygame.image.load(path).convert_alpha()
-    except (FileNotFoundError, pygame.error):
+    search_dirs = (ASSET_DIR, FALLBACK_ASSET_DIR)
+    image = None
+    for base_dir in search_dirs:
+        path = base_dir / filename
+        if not path.exists():
+            continue
+        try:
+            image = pygame.image.load(path).convert_alpha()
+        except (FileNotFoundError, pygame.error):
+            image = None
+        if image is not None:
+            break
+
+    if image is None:
         return None
 
     return pygame.transform.smoothscale(image, size)

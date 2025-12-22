@@ -6,9 +6,9 @@ class Food:
         self.position = grid_pos
         self.image = load_scaled_image("food.png", (TILE_SIZE, TILE_SIZE))
 
-    def draw(self, surface: pygame.Surface):
+    def draw(self, surface: pygame.Surface, offset_y: int = 0):
         x, y = self.position
-        dest = (x * TILE_SIZE, y * TILE_SIZE)
+        dest = (x * TILE_SIZE, y * TILE_SIZE + offset_y)
 
         if self.image:
             surface.blit(self.image, dest)
