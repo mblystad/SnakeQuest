@@ -3,9 +3,10 @@
 SnakeQuest is a pygame-based snake game with a gates-and-keys twist, level transitions, and optional audio/visual assets.
 
 ## Features
-- Classic snake movement with speed selection before each run.
+- Main menu with settings (speed + sound toggle) before starting a run.
 - Gates & keys mechanic to advance levels after collecting enough food.
-- Animated level-loading sequence and HUD for score/level/time.
+- Animated level-loading sequence plus a Level Clear pause between stages.
+- HUD for score/level/time with custom font support.
 - Optional art and music assets if files are present in the project root.
 
 ## Requirements
@@ -24,9 +25,11 @@ python main.py
 ```
 
 ## Controls
-- **Start / Menu**: `Space` to start, `Up/Down` (or `W/S`) to change speed, `1/2/3` to pick speed directly, `Enter` to start.
+- **Main Menu**: `Up/Down` (or `W/S`) to select, `Enter`/`Space` to confirm.
+- **Settings**: `Up/Down` to select, `Left/Right` to adjust, `1/2/3` set speed, `Esc` to return.
 - **In-game**: Arrow keys or `W/A/S/D` to move, `Esc` to quit.
-- **Game Over**: `Space` returns to the speed menu, `Esc` exits.
+- **Level Clear**: `Space` to continue, `Esc` exits.
+- **Game Over**: `Space` returns to main menu, `Esc` exits.
 
 ## Assets (optional)
 The game will load these files if they exist in the project root:
@@ -34,7 +37,8 @@ The game will load these files if they exist in the project root:
 - `banner.png` (HUD banner)
 - `key.png` (key sprite)
 - `head.png`, `segment.png`, `tail.png`, `throat.png` (snake parts)
-- `bg.mp3` (music)
+- `theme.wav` (music)
+- `Vipnagorgialla_Bd.otf`, `Vipnagorgialla_Rg.otf` (menu/game fonts)
 
 Missing assets fall back to simple shapes/colors.
 
