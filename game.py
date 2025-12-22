@@ -3,7 +3,7 @@ from pathlib import Path
 import pygame
 from config import (
     SCREEN_WIDTH, SCREEN_HEIGHT, FPS,
-    DEFAULT_FONT, GRID_WIDTH, GRID_HEIGHT, TILE_SIZE,
+    GRID_WIDTH, GRID_HEIGHT, TILE_SIZE,
     HUD_HEIGHT, PLAYFIELD_HEIGHT,
     COLOR_BUTTON, COLOR_KEY, COLOR_HUD, COLOR_WALL, COLOR_SNAKE,
     MENU_FONT_FILE, UI_FONT_FILE, load_custom_font,
@@ -23,8 +23,6 @@ class Game:
         self.running = True
         self.level = 1
         self.points = 0
-        self.transition_timer = 0
-        self.transition_text = ""
         self.background = build_background(PLAYFIELD_HEIGHT)
         self.menu_background = build_background(SCREEN_HEIGHT)
 
@@ -85,8 +83,6 @@ class Game:
         self.place_gate_elements()
         self.spawn_food()
         self.level_food_eaten = 0
-        self.transition_timer = 0
-        self.transition_text = ""
         self.loading_active = False
         self.loading_start_ms = None
         self.loading_tiles = []
@@ -357,12 +353,6 @@ class Game:
         self.last_frame_ms = now_ms
         dt_ms = min(dt_ms, 200)
 
-        if self.transition_timer > 0:
-            self.transition_timer -= 1
-            if self.transition_timer == 0:
-                self.begin_loading()
-            return
-
         if self.loading_active:
             self.update_loading()
             return
@@ -416,7 +406,6 @@ class Game:
             self.complete_level()
 
     def complete_level(self):
-        self.transition_text = "Level Clear"
         self.level_clear = True
 
     def draw(self):
@@ -448,9 +437,6 @@ class Game:
 
             self.draw_hud_band()
             self.draw_hud()
-            if self.transition_timer > 0:
-                self.draw_transition()
-
             pygame.display.flip()
 
     def draw_button(self):
@@ -631,16 +617,6 @@ class Game:
         self.draw_hud_band()
         self.draw_hud()
         pygame.display.flip()
-
-    def draw_transition(self):
-        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 160))
-        self.screen.blit(overlay, (0, 0))
-
-        if self.transition_text:
-            text_surf = self.game_title_font.render(self.transition_text, True, COLOR_HUD)
-            text_rect = text_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
-            self.screen.blit(text_surf, text_rect)
 
     def draw_level_clear(self):
         self.screen.fill((0, 0, 0))

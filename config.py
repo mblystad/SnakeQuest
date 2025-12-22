@@ -69,9 +69,6 @@ def load_pixel_font(size: int) -> pygame.font.Font:
     return pygame.font.SysFont("consolas", size)
 
 
-DEFAULT_FONT = load_pixel_font(24)
-
-
 def load_custom_font(filename: str, size: int) -> pygame.font.Font:
     """Load a specific font file with pixel fallback."""
     search_dirs = (ASSET_DIR, FALLBACK_ASSET_DIR)
