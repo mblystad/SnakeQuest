@@ -26,10 +26,10 @@ python main.py
 
 ## Controls
 - **Main Menu**: `Up/Down` (or `W/S`) to select, `Enter`/`Space` to confirm.
-- **Settings**: `Up/Down` to select, `Left/Right` to adjust, `1/2/3` set speed, `Esc` to return.
+- **Settings**: `Up/Down` to select, `Left/Right` to adjust, `1/2/3` set speed, `Enter` to open leaderboard, `Esc` to return.
 - **In-game**: Arrow keys or `W/A/S/D` to move, `Esc` to quit.
 - **Level Clear**: `Space` to continue, `Esc` exits.
-- **Game Over**: `Space` returns to main menu, `Esc` exits.
+- **Game Over**: type name + `Enter` to save score, `Space` skips to menu, `Esc` exits.
 
 ## Assets (optional)
 The game will load these files if they exist in the project root:

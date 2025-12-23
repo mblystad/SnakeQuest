@@ -1,3 +1,4 @@
+import json
 import random
 from pathlib import Path
 import pygame
@@ -23,6 +24,7 @@ class Game:
         self.running = True
         self.level = 1
         self.points = 0
+        self.elapsed_time_ms = 0
         self.background = build_background(PLAYFIELD_HEIGHT)
         self.menu_background = build_background(SCREEN_HEIGHT)
 
@@ -41,7 +43,6 @@ class Game:
 
         self.game_started = False
         self.game_over = False
-        self.start_time_ms: int | None = None
         self.level_food_eaten = 0
         self.playable_cells: set[tuple[int, int]] | None = None
         self.loading_active = False
@@ -60,8 +61,15 @@ class Game:
         self.menu_options = ["Start Game", "Settings", "Quit"]
         self.menu_index = 0
         self.input_locked = False
+        self.queued_direction: tuple[int, int] | None = None
         self.sound_on = True
         self.settings_index = 0
+        self.score_recorded = False
+        self.name_input = ""
+        self.name_max_length = 10
+        self.leaderboard_path = Path(__file__).with_name("leaderboard.json")
+        self.leaderboard_entries: list[dict] = []
+        self._load_leaderboard()
 
         self.menu_title_font = load_custom_font(MENU_FONT_FILE, 54)
         self.menu_option_font = load_custom_font(MENU_FONT_FILE, 30)
@@ -91,6 +99,7 @@ class Game:
         self.move_accumulator_ms = 0.0
         self.level_clear = False
         self.input_locked = False
+        self.queued_direction = None
 
     def start_game(self):
         """Begin a new run from the start screen."""
@@ -98,10 +107,13 @@ class Game:
         self.points = 0
         self.game_started = True
         self.game_over = False
-        self.start_time_ms = pygame.time.get_ticks()
+        self.elapsed_time_ms = 0
+        self.name_input = ""
+        self.score_recorded = False
         self.last_frame_ms = None
         self.move_accumulator_ms = 0.0
         self.input_locked = False
+        self.queued_direction = None
         self.level_clear = False
         self.start_music()
         self.begin_loading()
@@ -248,14 +260,33 @@ class Game:
 
             if event.type == pygame.KEYDOWN:
                 if self.game_over:
-                    if event.key == pygame.K_SPACE:
-                        self.game_over = False
-                        self.game_started = False
-                        self.menu_page = "main"
-                        self.stop_music()
-                    elif event.key == pygame.K_ESCAPE:
-                        self.stop_music()
-                        self.running = False
+                    if not self.score_recorded:
+                        if event.key == pygame.K_RETURN:
+                            self.record_score()
+                        elif event.key == pygame.K_SPACE:
+                            self.record_score()
+                            self.game_over = False
+                            self.game_started = False
+                            self.menu_page = "main"
+                            self.stop_music()
+                        elif event.key == pygame.K_BACKSPACE:
+                            self.name_input = self.name_input[:-1]
+                        elif event.key == pygame.K_ESCAPE:
+                            self.stop_music()
+                            self.running = False
+                        else:
+                            if event.unicode and event.unicode.isalnum():
+                                if len(self.name_input) < self.name_max_length:
+                                    self.name_input += event.unicode
+                    else:
+                        if event.key == pygame.K_SPACE:
+                            self.game_over = False
+                            self.game_started = False
+                            self.menu_page = "main"
+                            self.stop_music()
+                        elif event.key == pygame.K_ESCAPE:
+                            self.stop_music()
+                            self.running = False
                     continue
 
                 if not self.game_started:
@@ -275,20 +306,20 @@ class Game:
                                 self.running = False
                     elif self.menu_page == "settings":
                         if event.key in (pygame.K_UP, pygame.K_w):
-                            self.settings_index = (self.settings_index - 1) % 2
+                            self.settings_index = (self.settings_index - 1) % 3
                         elif event.key in (pygame.K_DOWN, pygame.K_s):
-                            self.settings_index = (self.settings_index + 1) % 2
+                            self.settings_index = (self.settings_index + 1) % 3
                         elif event.key in (pygame.K_LEFT, pygame.K_a):
                             if self.settings_index == 0:
                                 self.speed_index = (self.speed_index - 1) % len(self.speed_options)
                                 self.speed_multiplier = self.speed_options[self.speed_index][1]
-                            else:
+                            elif self.settings_index == 1:
                                 self.sound_on = not self.sound_on
                         elif event.key in (pygame.K_RIGHT, pygame.K_d):
                             if self.settings_index == 0:
                                 self.speed_index = (self.speed_index + 1) % len(self.speed_options)
                                 self.speed_multiplier = self.speed_options[self.speed_index][1]
-                            else:
+                            elif self.settings_index == 1:
                                 self.sound_on = not self.sound_on
                         elif event.key in (pygame.K_1, pygame.K_KP1):
                             self.speed_index = 0
@@ -302,9 +333,14 @@ class Game:
                         elif event.key in (pygame.K_RETURN, pygame.K_SPACE):
                             if self.settings_index == 1:
                                 self.sound_on = not self.sound_on
+                            elif self.settings_index == 2:
+                                self.menu_page = "leaderboard"
                         elif event.key in (pygame.K_ESCAPE, pygame.K_BACKSPACE):
                             self.menu_page = "main"
                             continue
+                    elif self.menu_page == "leaderboard":
+                        if event.key in (pygame.K_ESCAPE, pygame.K_BACKSPACE, pygame.K_RETURN, pygame.K_SPACE):
+                            self.menu_page = "settings"
                 elif self.game_started:
                     if self.level_clear:
                         if event.key == pygame.K_SPACE:
@@ -320,21 +356,13 @@ class Game:
                             self.complete_level()
                             continue
                         if event.key in (pygame.K_UP, pygame.K_w):
-                            if not self.input_locked:
-                                self.snake.set_direction((0, -1))
-                                self.input_locked = True
+                            self.queue_direction((0, -1))
                         elif event.key in (pygame.K_DOWN, pygame.K_s):
-                            if not self.input_locked:
-                                self.snake.set_direction((0, 1))
-                                self.input_locked = True
+                            self.queue_direction((0, 1))
                         elif event.key in (pygame.K_LEFT, pygame.K_a):
-                            if not self.input_locked:
-                                self.snake.set_direction((-1, 0))
-                                self.input_locked = True
+                            self.queue_direction((-1, 0))
                         elif event.key in (pygame.K_RIGHT, pygame.K_d):
-                            if not self.input_locked:
-                                self.snake.set_direction((1, 0))
-                                self.input_locked = True
+                            self.queue_direction((1, 0))
                     if event.key == pygame.K_ESCAPE:
                         self.stop_music()
                         self.running = False
@@ -362,7 +390,12 @@ class Game:
         while self.move_accumulator_ms >= move_interval_ms and not self.game_over:
             self.move_accumulator_ms -= move_interval_ms
             self.snake.update()
+            self.elapsed_time_ms += move_interval_ms
             self.input_locked = False
+            if self.queued_direction:
+                if self._direction_valid(self.queued_direction, self.snake.direction):
+                    self.snake.set_direction(self.queued_direction)
+                self.queued_direction = None
             self.check_collisions()
             self.check_food_eaten()
             self.check_key_reached()
@@ -414,6 +447,8 @@ class Game:
         elif not self.game_started:
             if self.menu_page == "settings":
                 self.draw_settings_screen()
+            elif self.menu_page == "leaderboard":
+                self.draw_leaderboard_screen()
             else:
                 self.draw_start_screen()
         elif self.level_clear:
@@ -503,6 +538,27 @@ class Game:
     def play_sound(self, name: str):
         """Safe sound hook (no-op if audio assets are missing)."""
         return
+
+    def _direction_valid(self, new_dir: tuple[int, int], current_dir: tuple[int, int]) -> bool:
+        cur_dx, cur_dy = current_dir
+        new_dx, new_dy = new_dir
+        if (cur_dx == -new_dx and cur_dx != 0) or (cur_dy == -new_dy and cur_dy != 0):
+            return False
+        return True
+
+    def queue_direction(self, new_dir: tuple[int, int]):
+        if not self.snake:
+            return
+
+        if not self.input_locked:
+            if self._direction_valid(new_dir, self.snake.direction):
+                self.snake.set_direction(new_dir)
+                self.input_locked = True
+                self.queued_direction = None
+            return
+
+        if self._direction_valid(new_dir, self.snake.pending_direction):
+            self.queued_direction = new_dir
 
     def required_food_for_level(self) -> int:
         if self.level == 1:
@@ -691,7 +747,8 @@ class Game:
 
         speed_label = f"Speed: {self.speed_options[self.speed_index][0]}"
         sound_label = f"Sound: {'On' if self.sound_on else 'Off'}"
-        settings_labels = [speed_label, sound_label]
+        leaderboard_label = "Leaderboard"
+        settings_labels = [speed_label, sound_label, leaderboard_label]
         base_y = SCREEN_HEIGHT // 2 - 20
         line_gap = 40
         for idx, label in enumerate(settings_labels):
@@ -699,6 +756,33 @@ class Game:
             option_text = self.menu_option_font.render(label, True, color)
             option_rect = option_text.get_rect(center=(SCREEN_WIDTH // 2, base_y + idx * line_gap))
             self.screen.blit(option_text, option_rect)
+
+        prompt_text = self.menu_prompt_font.render("Press ENTER to open, ESC to return", True, COLOR_HUD)
+        prompt_rect = prompt_text.get_rect(midbottom=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 28))
+        self.screen.blit(prompt_text, prompt_rect)
+        pygame.display.flip()
+
+    def draw_leaderboard_screen(self):
+        self.draw_menu_background()
+
+        title_text = self.menu_title_font.render("Leaderboard", True, COLOR_HUD)
+        title_rect = title_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 140))
+        self.screen.blit(title_text, title_rect)
+
+        base_y = SCREEN_HEIGHT // 2 - 60
+        line_gap = 34
+        if self.leaderboard_entries:
+            for idx, entry in enumerate(self.leaderboard_entries, start=1):
+                name = entry.get("name", "Anon")
+                score = entry.get("score", 0)
+                label = f"{idx}. {name} - {score}"
+                entry_text = self.menu_option_font.render(label, True, COLOR_HUD)
+                entry_rect = entry_text.get_rect(center=(SCREEN_WIDTH // 2, base_y + (idx - 1) * line_gap))
+                self.screen.blit(entry_text, entry_rect)
+        else:
+            empty_text = self.menu_option_font.render("No scores yet", True, COLOR_HUD)
+            empty_rect = empty_text.get_rect(center=(SCREEN_WIDTH // 2, base_y))
+            self.screen.blit(empty_text, empty_rect)
 
         prompt_text = self.menu_prompt_font.render("Press ESC to return", True, COLOR_HUD)
         prompt_rect = prompt_text.get_rect(midbottom=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 28))
@@ -725,27 +809,100 @@ class Game:
         self.screen.blit(overlay, (0, 0))
 
         title_text = self.game_title_font.render("Game Over", True, COLOR_HUD)
-        prompt_text = self.game_font.render(
-            "Press SPACE for main menu or ESC to exit",
-            True,
-            COLOR_HUD,
-        )
+        if not self.score_recorded:
+            prompt_label = "Press ENTER to save, SPACE to skip, ESC to exit"
+        else:
+            prompt_label = "Press SPACE for main menu or ESC to exit"
+        prompt_text = self.game_font.render(prompt_label, True, COLOR_HUD)
 
         title_rect = title_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 20))
         prompt_rect = prompt_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 20))
         self.screen.blit(title_text, title_rect)
         self.screen.blit(prompt_text, prompt_rect)
+
+        if not self.score_recorded:
+            name_display = self.name_input if self.name_input else "_"
+            name_text = self.menu_option_font.render(f"Name: {name_display}", True, COLOR_HUD)
+            name_rect = name_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 60))
+            self.screen.blit(name_text, name_rect)
+
+            hint_text = self.menu_prompt_font.render(
+                "Type your name, ENTER to save, SPACE to skip",
+                True,
+                COLOR_HUD,
+            )
+            hint_rect = hint_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 92))
+            self.screen.blit(hint_text, hint_rect)
         pygame.display.flip()
 
     def format_elapsed_time(self) -> str:
-        if not self.start_time_ms:
-            return "00:00"
-
-        elapsed_ms = pygame.time.get_ticks() - self.start_time_ms
-        total_seconds = max(0, elapsed_ms // 1000)
+        total_seconds = max(0, int(self.elapsed_time_ms) // 1000)
         minutes = total_seconds // 60
         seconds = total_seconds % 60
         return f"{minutes:02}:{seconds:02}"
+
+    def _load_leaderboard(self):
+        try:
+            if not self.leaderboard_path.exists():
+                self.leaderboard_entries = []
+                return
+            payload = json.loads(self.leaderboard_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            self.leaderboard_entries = []
+            return
+
+        entries = None
+        if isinstance(payload, dict):
+            entries = payload.get("entries")
+            if entries is None:
+                entries = payload.get("scores")
+
+        if not isinstance(entries, list):
+            self.leaderboard_entries = []
+            return
+
+        self.leaderboard_entries = self._normalize_leaderboard(entries)
+
+    def _save_leaderboard(self):
+        payload = {"entries": self.leaderboard_entries}
+        try:
+            self.leaderboard_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except OSError:
+            return
+
+    def _normalize_leaderboard(self, entries: list) -> list[dict]:
+        cleaned: list[dict] = []
+        for entry in entries:
+            if isinstance(entry, dict):
+                name = entry.get("name", "Anon")
+                score = entry.get("score", 0)
+            else:
+                name = "Anon"
+                score = entry
+            try:
+                score_value = int(score)
+            except (TypeError, ValueError):
+                continue
+            name_value = str(name).strip() if name else "Anon"
+            if not name_value:
+                name_value = "Anon"
+            cleaned.append({"name": name_value, "score": score_value})
+        cleaned.sort(key=lambda item: item["score"], reverse=True)
+        return cleaned[:5]
+
+    def record_score(self):
+        if self.score_recorded:
+            return
+
+        self.score_recorded = True
+        raw_name = self.name_input or ""
+        cleaned_name = "".join(ch for ch in raw_name if ch.isalnum())
+        name = cleaned_name.strip()
+        if not name:
+            name = f"Snake{random.randint(1000, 9999)}"
+        self.leaderboard_entries.append({"name": name, "score": int(self.points)})
+        self.leaderboard_entries = self._normalize_leaderboard(self.leaderboard_entries)
+        self._save_leaderboard()
 
     def run(self):
         while self.running:
