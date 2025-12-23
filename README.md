@@ -4,6 +4,7 @@ SnakeQuest is a pygame-based snake game with a gates-and-keys twist, level trans
 
 ## Features
 - Main menu with settings (speed + sound toggle) before starting a run.
+- Persistent leaderboard (top 5 scores) with name entry.
 - Gates & keys mechanic to advance levels after collecting enough food.
 - Animated level-loading sequence plus a Level Clear pause between stages.
 - HUD for score/level/time with custom font support.
@@ -29,7 +30,11 @@ python main.py
 - **Settings**: `Up/Down` to select, `Left/Right` to adjust, `1/2/3` set speed, `Enter` to open leaderboard, `Esc` to return.
 - **In-game**: Arrow keys or `W/A/S/D` to move, `Esc` to quit.
 - **Level Clear**: `Space` to continue, `Esc` exits.
-- **Game Over**: type name + `Enter` to save score, `Space` skips to menu, `Esc` exits.
+- **Game Over**: type name (letters/numbers only, max 10 chars) + `Enter` to save score, `Space` skips to menu, `Esc` exits.
+
+## Leaderboard
+- Stored in `leaderboard.json` (auto-created on the first game over).
+- If you skip name entry, the game saves `Snake####` automatically.
 
 ## Assets (optional)
 The game will load these files if they exist in the project root:
