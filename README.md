@@ -28,7 +28,8 @@ python main.py
 ## Controls
 - **Main Menu**: `Up/Down` (or `W/S`) to select, `Enter`/`Space` to confirm.
 - **Settings**: `Up/Down` to select, `Left/Right` to adjust, `1/2/3` set speed, `Enter` to open leaderboard, `Esc` to return.
-- **In-game**: Arrow keys or `W/A/S/D` to move, `Esc` to quit.
+- **In-game**: Arrow keys or `W/A/S/D` to move, `Enter` to pause/resume, `Esc` to quit, `N` to skip a level.
+- **Paused**: `Enter` to resume, `Esc` returns to main menu.
 - **Level Clear**: `Space` to continue, `Esc` exits.
 - **Game Over**: type name (letters/numbers only, max 10 chars) + `Enter` to save score, `Space` skips to menu, `Esc` exits.
 
