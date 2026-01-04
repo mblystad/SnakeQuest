@@ -54,7 +54,12 @@ class Game:
         self.game_started = False
         self.game_over = False
         self.level_food_eaten = 0
+        self.sacrifice_ammo = 0
         self.playable_cells: set[tuple[int, int]] | None = None
+        self.sacrifice_playable_cells: set[tuple[int, int]] | None = None
+        self.sacrifice_left_cells: set[tuple[int, int]] | None = None
+        self.sacrifice_right_cells: set[tuple[int, int]] | None = None
+        self.sacrifice_wall_open = False
         self.loading_active = False
         self.loading_start_ms: int | None = None
         self.loading_duration_ms = 2000
@@ -93,6 +98,10 @@ class Game:
         self.first_tetris_level = 6
         self.last_normal_level = self.first_tetris_level - 1
         self.last_tetris_level = self.first_tetris_level + len(self.TETRIS_SHAPES) - 1
+        self.first_sacrifice_level = self.last_tetris_level + 1
+        self.sacrifice_level_count = 5
+        self.last_sacrifice_level = self.first_sacrifice_level + self.sacrifice_level_count - 1
+        self.breakable_wall_positions: set[tuple[int, int]] = set()
         self.story_active = False
         self.story_text = ""
         self.story_next_action = ""
@@ -105,7 +114,7 @@ class Game:
         self.story_snake: Snake | None = None
         self.story_intro_text = "Placeholder intro"
         self.story_mid_text = "Placeholder level 5-6"
-        self.story_end_text = "Placeholder ending"
+        self.story_end_text = "Placeholder sacrifice intro"
 
     def start_level(self):
         """Set up a fresh level layout with increasing gate spacing."""
@@ -116,9 +125,12 @@ class Game:
         self.layout_ready = False
         if self.playable_cells and self.snake.head not in self.playable_cells:
             self.snake.segments[0] = random.choice(list(self.playable_cells))
+        if self._in_sacrifice_levels():
+            self._place_snake_in_sacrifice_start()
         self.place_gate_elements()
         self.spawn_food()
         self.level_food_eaten = 0
+        self.sacrifice_ammo = 0
         self.loading_active = False
         self.loading_start_ms = None
         self.loading_tiles = []
@@ -131,6 +143,7 @@ class Game:
         self.input_locked = False
         self.queued_direction = None
 
+
     def start_game(self):
         """Begin a new run from the start screen."""
         self.level = 1
@@ -140,6 +153,8 @@ class Game:
         self.elapsed_time_ms = 0
         self.name_input = ""
         self.score_recorded = False
+        self.sacrifice_ammo = 0
+        self.sacrifice_wall_open = False
         self.last_frame_ms = None
         self.move_accumulator_ms = 0.0
         self.input_locked = False
@@ -174,20 +189,32 @@ class Game:
         """Create a neon wall outline that also serves as collision."""
 
         self.wall_positions = set()
-        if self.level >= self.first_tetris_level:
+        self.breakable_wall_positions = set()
+        self.playable_cells = None
+        self.sacrifice_playable_cells = None
+        self.sacrifice_left_cells = None
+        self.sacrifice_right_cells = None
+        self.sacrifice_wall_open = False
+
+        if self._in_sacrifice_levels():
+            self._build_sacrifice_arena()
+            return
+
+        if self._in_tetris_levels():
             self.playable_cells = self._build_tetris_arena()
             for x in range(GRID_WIDTH):
                 for y in range(GRID_HEIGHT):
                     if (x, y) not in self.playable_cells:
                         self.wall_positions.add((x, y))
-        else:
-            self.playable_cells = None
-            for x in range(GRID_WIDTH):
-                self.wall_positions.add((x, 0))
-                self.wall_positions.add((x, GRID_HEIGHT - 1))
-            for y in range(GRID_HEIGHT):
-                self.wall_positions.add((0, y))
-                self.wall_positions.add((GRID_WIDTH - 1, y))
+            return
+
+        self.playable_cells = None
+        for x in range(GRID_WIDTH):
+            self.wall_positions.add((x, 0))
+            self.wall_positions.add((x, GRID_HEIGHT - 1))
+        for y in range(GRID_HEIGHT):
+            self.wall_positions.add((0, y))
+            self.wall_positions.add((GRID_WIDTH - 1, y))
 
     def _init_audio(self):
         """Load background music if theme.wav exists, otherwise stay silent."""
@@ -227,6 +254,10 @@ class Game:
 
     def place_gate_elements(self):
         """Place the button and key with increasing separation per level."""
+        if self._in_sacrifice_levels():
+            self._place_sacrifice_gate()
+            return
+
         if self.playable_cells:
             candidates = list(self.playable_cells)
             random.shuffle(candidates)
@@ -278,6 +309,21 @@ class Game:
 
     def spawn_food(self):
         assert self.food is not None and self.snake is not None
+        if self._in_sacrifice_levels() and self.sacrifice_playable_cells:
+            if self.sacrifice_wall_open:
+                candidates = list(self.sacrifice_playable_cells)
+            else:
+                candidates = list(self.sacrifice_left_cells or self.sacrifice_playable_cells)
+            random.shuffle(candidates)
+            for candidate in candidates:
+                if candidate in self.snake.segments:
+                    continue
+                if candidate == self.button_pos or candidate == self.key_pos:
+                    continue
+                self.food.position = candidate
+                return
+            return
+
         if self.playable_cells:
             candidates = list(self.playable_cells)
             random.shuffle(candidates)
@@ -409,9 +455,13 @@ class Game:
                                 self.level += 1
                                 self.level_clear = False
                                 self.start_story(self.story_mid_text, "begin_loading")
-                            elif self.level >= self.last_tetris_level:
+                            elif self.level == self.last_tetris_level:
+                                self.level = self.first_sacrifice_level
                                 self.level_clear = False
-                                self.start_story(self.story_end_text, "end_to_menu")
+                                self.start_story(self.story_end_text, "begin_loading")
+                            elif self.level >= self.last_sacrifice_level:
+                                self.level_clear = False
+                                self.exit_to_menu()
                             else:
                                 self.level += 1
                                 self.level_clear = False
@@ -431,6 +481,9 @@ class Game:
                         if event.key == pygame.K_RETURN:
                             self.game_paused = True
                             self.last_frame_ms = pygame.time.get_ticks()
+                            continue
+                        if event.key == pygame.K_s and self._in_sacrifice_levels():
+                            self.shoot_sacrifice()
                             continue
                         if event.key == pygame.K_n:
                             self.complete_level()
@@ -502,6 +555,15 @@ class Game:
     def check_collisions(self):
         head_x, head_y = self.snake.head
 
+        if self._in_sacrifice_levels():
+            if not self.sacrifice_playable_cells or (head_x, head_y) not in self.sacrifice_playable_cells:
+                self.play_sound("death")
+                self.game_over = True
+                self.game_started = False
+                self.game_paused = False
+                self.stop_music()
+            return
+
         # Wall collision ends game
         if head_x < 0 or head_x >= GRID_WIDTH or head_y < 0 or head_y >= GRID_HEIGHT:
             self.play_sound("death")
@@ -526,6 +588,7 @@ class Game:
             self.snake.grow(1)
             self.points += 1
             self.level_food_eaten += 1
+            self.sacrifice_ammo += 1
             self.spawn_food()
 
     def check_key_reached(self):
@@ -553,9 +616,13 @@ class Game:
                 self.level += 1
                 self.level_clear = False
                 self.start_story(self.story_mid_text, "begin_loading")
-            elif self.level >= self.last_tetris_level:
+            elif self.level == self.last_tetris_level:
+                self.level = self.first_sacrifice_level
                 self.level_clear = False
-                self.start_story(self.story_end_text, "end_to_menu")
+                self.start_story(self.story_end_text, "begin_loading")
+            elif self.level >= self.last_sacrifice_level:
+                self.level_clear = False
+                self.exit_to_menu()
             else:
                 self.level += 1
                 self.level_clear = False
@@ -692,7 +759,10 @@ class Game:
 
         for (x, y) in self.wall_positions:
             rect = pygame.Rect(x * TILE_SIZE, y * TILE_SIZE + HUD_HEIGHT, TILE_SIZE, TILE_SIZE)
-            pygame.draw.rect(self.screen, COLOR_WALL, rect, width=2, border_radius=4)
+            if (x, y) in self.breakable_wall_positions:
+                pygame.draw.rect(self.screen, COLOR_WALL, rect)
+            else:
+                pygame.draw.rect(self.screen, COLOR_WALL, rect, width=2, border_radius=4)
 
     def draw_hud_band(self):
         if self.banner_image:
@@ -754,6 +824,140 @@ class Game:
         if self.level == 2:
             return 3
         return 5
+
+    def _in_tetris_levels(self) -> bool:
+        return self.first_tetris_level <= self.level <= self.last_tetris_level
+
+    def _in_sacrifice_levels(self) -> bool:
+        return self.first_sacrifice_level <= self.level <= self.last_sacrifice_level
+
+    def _build_sacrifice_arena(self):
+        level_index = max(0, self.level - self.first_sacrifice_level)
+        base_width = max(12, (GRID_WIDTH - 3) // 2)
+        base_height = max(12, GRID_HEIGHT - 4)
+        box_width = max(8, base_width - level_index)
+        box_height = max(8, base_height - level_index * 2)
+
+        total_width = box_width * 2 - 1
+        if total_width > GRID_WIDTH - 2:
+            box_width = max(8, (GRID_WIDTH - 1) // 2)
+            total_width = box_width * 2 - 1
+
+        left_x = max(1, (GRID_WIDTH - total_width) // 2)
+        top_y = max(1, (GRID_HEIGHT - box_height) // 2)
+        right_x = left_x + box_width - 1
+
+        self.sacrifice_left_cells = set()
+        self.sacrifice_right_cells = set()
+
+        for x in range(left_x + 1, left_x + box_width - 1):
+            for y in range(top_y + 1, top_y + box_height - 1):
+                self.sacrifice_left_cells.add((x, y))
+        for x in range(right_x + 1, right_x + box_width - 1):
+            for y in range(top_y + 1, top_y + box_height - 1):
+                self.sacrifice_right_cells.add((x, y))
+
+        self.sacrifice_playable_cells = set()
+        self.sacrifice_playable_cells.update(self.sacrifice_left_cells)
+        self.sacrifice_playable_cells.update(self.sacrifice_right_cells)
+
+        # Left box perimeter
+        for x in range(left_x, left_x + box_width):
+            self.wall_positions.add((x, top_y))
+            self.wall_positions.add((x, top_y + box_height - 1))
+        for y in range(top_y, top_y + box_height):
+            self.wall_positions.add((left_x, y))
+            self.wall_positions.add((left_x + box_width - 1, y))
+
+        # Right box perimeter (shares the middle wall)
+        for x in range(right_x, right_x + box_width):
+            self.wall_positions.add((x, top_y))
+            self.wall_positions.add((x, top_y + box_height - 1))
+        for y in range(top_y, top_y + box_height):
+            self.wall_positions.add((right_x, y))
+            self.wall_positions.add((right_x + box_width - 1, y))
+
+        separator_x = right_x
+        for y in range(top_y, top_y + box_height):
+            pos = (separator_x, y)
+            self.wall_positions.add(pos)
+            self.breakable_wall_positions.add(pos)
+
+    def _place_sacrifice_gate(self):
+        if not self.sacrifice_right_cells:
+            self.button_pos = None
+            self.key_pos = None
+            return
+
+        candidates = list(self.sacrifice_right_cells)
+        random.shuffle(candidates)
+        button = None
+        key = None
+        for candidate in candidates:
+            if candidate == self.snake.head:
+                continue
+            button = candidate
+            break
+        if button is None:
+            button = self.snake.head
+        for candidate in candidates:
+            if candidate == button or candidate == self.snake.head:
+                continue
+            key = candidate
+            break
+        if key is None:
+            key = button
+        self.button_pos = button
+        self.key_pos = key
+
+    def _place_snake_in_sacrifice_start(self):
+        if not self.sacrifice_left_cells or not self.snake:
+            return
+        start_pos = random.choice(list(self.sacrifice_left_cells))
+        self.snake.segments = [start_pos]
+        self.snake.direction = (1, 0)
+        self.snake.pending_direction = (1, 0)
+
+    def shoot_sacrifice(self):
+        if not self._in_sacrifice_levels():
+            return
+        if self.sacrifice_ammo <= 0:
+            return
+        if not self.snake:
+            return
+        if len(self.snake.segments) <= 1:
+            return
+
+        dx, dy = self.snake.pending_direction
+        if (dx, dy) == (0, 0):
+            return
+
+        head_x, head_y = self.snake.head
+        x = head_x + dx
+        y = head_y + dy
+        hit_pos = None
+        while 0 <= x < GRID_WIDTH and 0 <= y < GRID_HEIGHT:
+            if (x, y) in self.breakable_wall_positions:
+                hit_pos = (x, y)
+                break
+            if (x, y) in self.wall_positions:
+                break
+            x += dx
+            y += dy
+
+        if hit_pos is None:
+            return
+
+        self.breakable_wall_positions.discard(hit_pos)
+        self.wall_positions.discard(hit_pos)
+        if self.sacrifice_playable_cells is not None:
+            self.sacrifice_playable_cells.add(hit_pos)
+        self.sacrifice_wall_open = True
+        self.sacrifice_ammo -= 1
+        if self.snake.grow_pending > 0:
+            self.snake.grow_pending -= 1
+        elif len(self.snake.segments) > 1:
+            self.snake.segments.pop()
 
     def _build_story_path(self) -> list[tuple[int, int]]:
         margin = 2
@@ -822,24 +1026,15 @@ class Game:
 
     def _build_tetris_arena(self) -> set[tuple[int, int]]:
         """Create a full-arena Tetris-shaped playfield."""
-        shapes = [
-            ("I", [(0, 0), (1, 0), (2, 0), (3, 0)]),
-            ("O", [(0, 0), (1, 0), (0, 1), (1, 1)]),
-            ("T", [(0, 0), (1, 0), (2, 0), (1, 1)]),
-            ("S", [(1, 0), (2, 0), (0, 1), (1, 1)]),
-            ("Z", [(0, 0), (1, 0), (1, 1), (2, 1)]),
-            ("L", [(0, 0), (0, 1), (0, 2), (1, 2)]),
-            ("J", [(1, 0), (1, 1), (1, 2), (0, 2)]),
-        ]
-        shape_index = ((self.level - 4) // 3) % len(shapes)
-        _, base_shape = shapes[shape_index]
+        shape_index = (self.level - self.first_tetris_level) % len(self.TETRIS_SHAPES)
+        _, base_shape = self.TETRIS_SHAPES[shape_index]
 
         max_x = max(p[0] for p in base_shape)
         max_y = max(p[1] for p in base_shape)
         max_scale_x = max(1, (GRID_WIDTH - 4) // (max_x + 1))
         max_scale_y = max(1, (GRID_HEIGHT - 4) // (max_y + 1))
         max_scale = min(max_scale_x, max_scale_y)
-        if self.level <= 6:
+        if shape_index < 3:
             scale = max(3, max_scale - 1)
         else:
             scale = max(3, max_scale - 2)
@@ -860,9 +1055,9 @@ class Game:
 
     def _shape_level_offset(self) -> int:
         """0, 1, 2 within the current 3-level shape group."""
-        if self.level < 4:
+        if not self._in_tetris_levels():
             return 0
-        return (self.level - 4) % 3
+        return (self.level - self.first_tetris_level) % 3
 
     def begin_loading(self):
         """Show a 2s loading build for the next level before gameplay starts."""
@@ -877,7 +1072,7 @@ class Game:
         if not self.wall_positions:
             return []
 
-        if self.level < 4:
+        if self.level <= self.last_normal_level:
             tiles: list[tuple[int, int]] = []
             top = 0
             bottom = GRID_HEIGHT - 1
@@ -1094,6 +1289,9 @@ class Game:
         self.game_over = False
         self.level_clear = False
         self.loading_active = False
+        self.story_active = False
+        self.story_text = ""
+        self.story_next_action = ""
         self.menu_page = "main"
         self.stop_music()
 
