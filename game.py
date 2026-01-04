@@ -1,4 +1,5 @@
 import json
+import math
 import random
 from collections import deque
 from pathlib import Path
@@ -36,6 +37,8 @@ class Game:
         self.level = 1
         self.points = 0
         self.elapsed_time_ms = 0
+        self.level_start_points = 0
+        self.level_start_time_ms = 0
         self.background = build_background(PLAYFIELD_HEIGHT)
         self.menu_background = build_background(SCREEN_HEIGHT)
 
@@ -50,6 +53,7 @@ class Game:
         self.wall_positions: set[tuple[int, int]] = set()
         self.key_image = load_scaled_image("key.png", (TILE_SIZE, TILE_SIZE))
         self.start_bg = load_scaled_image("menubg.png", (SCREEN_WIDTH, SCREEN_HEIGHT))
+        self.start_bg_alt = load_scaled_image("menubg2.png", (SCREEN_WIDTH, SCREEN_HEIGHT))
         self.banner_image = load_scaled_image("banner.png", (SCREEN_WIDTH, HUD_HEIGHT))
         self.sacrifice_shot_size = max(4, int(TILE_SIZE * 0.7))
         self.sacrifice_shot_corner = max(2, int(self.sacrifice_shot_size * 0.3))
@@ -128,9 +132,21 @@ class Game:
         self.story_intro_text = "Placeholder intro"
         self.story_mid_text = "Placeholder level 5-6"
         self.story_end_text = "Placeholder sacrifice intro"
+        self.intro_active = True
+        self.intro_done = False
+        self.intro_path = self._build_intro_path()
+        self.intro_path_index = 0
+        self.intro_snake_length = 12
+        self.intro_snake: Snake | None = None
+        self.intro_last_frame_ms: int | None = None
+        self.intro_move_accumulator_ms = 0.0
+        self.intro_move_interval_ms = 90
+        self._reset_intro_snake()
 
     def start_level(self):
         """Set up a fresh level layout with increasing gate spacing."""
+        self.level_start_points = self.points
+        self.level_start_time_ms = self.elapsed_time_ms
         self.snake = Snake(grid_pos=(5, 5))
         self.food = Food()
         if not self.layout_ready:
@@ -232,6 +248,29 @@ class Game:
         self.sacrifice_explosions.clear()
         self.start_music()
         self.start_story(self.story_intro_text, "begin_loading")
+
+    def replay_level(self):
+        """Restart the current level from its checkpoint."""
+        self.game_started = True
+        self.game_over = False
+        self.level_clear = False
+        self.game_paused = False
+        self.loading_active = False
+        self.story_active = False
+        self.story_text = ""
+        self.story_next_action = ""
+        self.name_input = ""
+        self.score_recorded = False
+        self.last_frame_ms = None
+        self.move_accumulator_ms = 0.0
+        self.input_locked = False
+        self.queued_direction = None
+        self.sacrifice_shot_active = False
+        self.sacrifice_explosions.clear()
+        self.points = self.level_start_points
+        self.elapsed_time_ms = self.level_start_time_ms
+        self.start_music()
+        self.begin_loading()
 
     def start_story(self, text: str, next_action: str):
         self.story_active = True
@@ -464,7 +503,7 @@ class Game:
                             self.record_score()
                         elif event.key == pygame.K_SPACE:
                             self.record_score()
-                            self.start_game()
+                            self.replay_level()
                         elif event.key == pygame.K_BACKSPACE:
                             self.name_input = self.name_input[:-1]
                         elif event.key == pygame.K_ESCAPE:
@@ -476,10 +515,15 @@ class Game:
                                     self.name_input += event.unicode
                     else:
                         if event.key == pygame.K_SPACE:
-                            self.start_game()
+                            self.replay_level()
                         elif event.key == pygame.K_ESCAPE:
                             self.stop_music()
                             self.running = False
+                    continue
+
+                if not self.game_started and self.menu_page == "main" and self.intro_active:
+                    self.intro_active = False
+                    self.intro_done = True
                     continue
 
                 if not self.game_started:
@@ -599,7 +643,11 @@ class Game:
                     self.running = False
 
     def update(self):
-        if not self.game_started or self.game_over or self.level_clear:
+        if not self.game_started:
+            if self.intro_active:
+                self.update_intro()
+            return
+        if self.game_over or self.level_clear:
             return
         if self.story_active:
             self.update_story()
@@ -648,6 +696,19 @@ class Game:
         while self.story_move_accumulator_ms >= self.story_move_interval_ms:
             self.story_move_accumulator_ms -= self.story_move_interval_ms
             self._advance_story_snake()
+
+    def update_intro(self):
+        now_ms = pygame.time.get_ticks()
+        if self.intro_last_frame_ms is None:
+            self.intro_last_frame_ms = now_ms
+        dt_ms = now_ms - self.intro_last_frame_ms
+        self.intro_last_frame_ms = now_ms
+        dt_ms = min(dt_ms, 200)
+
+        self.intro_move_accumulator_ms += dt_ms
+        while self.intro_move_accumulator_ms >= self.intro_move_interval_ms:
+            self.intro_move_accumulator_ms -= self.intro_move_interval_ms
+            self._advance_intro_snake()
 
     def check_collisions(self):
         head_x, head_y = self.snake.head
@@ -825,6 +886,27 @@ class Game:
         esc_rect = esc_text.get_rect(center=(SCREEN_WIDTH // 2, box_rect.bottom + 48))
         self.screen.blit(prompt_text, prompt_rect)
         self.screen.blit(esc_text, esc_rect)
+        pygame.display.flip()
+
+    def draw_intro_screen(self):
+        if self.start_bg:
+            self.screen.blit(self.start_bg, (0, 0))
+        else:
+            self.screen.blit(self.menu_background, (0, 0))
+
+        fade = self._intro_fade_progress()
+        if self.start_bg_alt and fade > 0.0:
+            alpha = int(255 * fade)
+            self.start_bg_alt.set_alpha(alpha)
+            self.screen.blit(self.start_bg_alt, (0, 0))
+            self.start_bg_alt.set_alpha(255)
+
+        if self.intro_snake:
+            self.intro_snake.draw(self.screen, offset_y=0, alpha=0.0)
+
+        prompt_text = self.menu_prompt_font.render("Press any key to skip", True, COLOR_HUD)
+        prompt_rect = prompt_text.get_rect(midbottom=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 18))
+        self.screen.blit(prompt_text, prompt_rect)
         pygame.display.flip()
 
     def draw_button(self):
@@ -1268,6 +1350,87 @@ class Game:
                 self.story_snake.head_frames
             )
 
+    def _build_intro_path(self) -> list[tuple[int, int]]:
+        cols = max(1, SCREEN_WIDTH // TILE_SIZE)
+        rows = max(1, SCREEN_HEIGHT // TILE_SIZE)
+        left = 1
+        right = max(left, cols - 2)
+        top = 1
+        bottom = max(top, rows - 2)
+
+        mid_y = (top + bottom) // 2
+        amplitude = max(2, (bottom - top) // 2 - 1)
+        span = max(1, right - left)
+
+        path: list[tuple[int, int]] = []
+        prev_y = None
+        for x in range(left, right + 1):
+            t = (x - left) / span
+            y_float = mid_y + amplitude * math.sin(t * math.tau)
+            target_y = int(round(y_float))
+            target_y = max(top, min(bottom, target_y))
+            if prev_y is None:
+                path.append((x, target_y))
+                prev_y = target_y
+                continue
+
+            path.append((x, prev_y))
+            step = 1 if target_y > prev_y else -1
+            while prev_y != target_y:
+                prev_y += step
+                path.append((x, prev_y))
+
+        return path
+
+    def _reset_intro_snake(self):
+        if not self.intro_path:
+            self.intro_snake = Snake(grid_pos=(GRID_WIDTH // 2, GRID_HEIGHT // 2))
+            self.intro_snake_length = max(4, self.intro_snake_length)
+            return
+
+        self.intro_path_index = 0
+        start_pos = self.intro_path[0]
+        positions = [start_pos for _ in range(self.intro_snake_length)]
+        self.intro_snake = Snake(grid_pos=start_pos)
+        self.intro_snake.segments = positions
+        if len(positions) > 1:
+            self.intro_snake.direction = (1, 0)
+            self.intro_snake.pending_direction = (1, 0)
+
+    def _advance_intro_snake(self):
+        if not self.intro_snake or not self.intro_path:
+            return
+
+        if self.intro_path_index >= len(self.intro_path) - 1:
+            self.intro_active = False
+            self.intro_done = True
+            return
+
+        self.intro_path_index += 1
+        new_head = self.intro_path[self.intro_path_index]
+        old_head = self.intro_snake.segments[0]
+        dx, dy = new_head[0] - old_head[0], new_head[1] - old_head[1]
+        if (dx, dy) != (0, 0):
+            self.intro_snake.direction = (dx, dy)
+            self.intro_snake.pending_direction = (dx, dy)
+
+        self.intro_snake.segments.insert(0, new_head)
+        if len(self.intro_snake.segments) > self.intro_snake_length:
+            self.intro_snake.segments.pop()
+
+        if self.intro_snake.head_frames:
+            self.intro_snake.anim_index = (self.intro_snake.anim_index + 1) % len(
+                self.intro_snake.head_frames
+            )
+
+    def _intro_fade_progress(self) -> float:
+        if not self.intro_path:
+            return 1.0
+        progress = self.intro_path_index / max(1, len(self.intro_path) - 1)
+        if progress <= 1.0 / 3.0:
+            return 0.0
+        return min(1.0, (progress - 1.0 / 3.0) / (2.0 / 3.0))
+
     def _build_tetris_arena(self) -> set[tuple[int, int]]:
         """Create a full-arena Tetris-shaped playfield."""
         shape_index = (self.level - self.first_tetris_level) % len(self.TETRIS_SHAPES)
@@ -1412,6 +1575,10 @@ class Game:
                 pygame.draw.rect(self.screen, COLOR_WALL, rect, width=2, border_radius=4)
 
     def draw_start_screen(self):
+        if self.intro_active:
+            self.draw_intro_screen()
+            return
+
         if self.start_bg:
             self.screen.blit(self.start_bg, (0, 0))
         else:
@@ -1502,9 +1669,9 @@ class Game:
 
         title_text = self.game_title_font.render("Game Over", True, COLOR_HUD)
         if not self.score_recorded:
-            prompt_label = "Play again? SPACE | ENTER to save | ESC to exit"
+            prompt_label = "Replay level? SPACE | ENTER to save | ESC to exit"
         else:
-            prompt_label = "Play again? SPACE | ESC to exit"
+            prompt_label = "Replay level? SPACE | ESC to exit"
         prompt_text = self.game_font.render(prompt_label, True, COLOR_HUD)
 
         title_rect = title_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 20))
@@ -1519,7 +1686,7 @@ class Game:
             self.screen.blit(name_text, name_rect)
 
             hint_text = self.menu_prompt_font.render(
-                "Type your name, ENTER to save, SPACE to play again",
+                "Type your name, ENTER to save, SPACE to replay level",
                 True,
                 COLOR_HUD,
             )
