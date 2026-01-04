@@ -137,13 +137,13 @@ class Game:
         self.intro_path = self._build_intro_path()
         self.intro_path_index = 0
         self.intro_snake_length = 12
-        self.intro_snake_scale = 1.5
+        self.intro_snake_scale = 2.25
         self.intro_snake_tile = max(4, int(round(TILE_SIZE * self.intro_snake_scale)))
         self.intro_snake: Snake | None = None
         self.intro_snake_images: dict[str, list[pygame.Surface] | pygame.Surface] | None = None
         self.intro_last_frame_ms: int | None = None
         self.intro_move_accumulator_ms = 0.0
-        self.intro_move_interval_ms = 90
+        self.intro_move_interval_ms = 65
         self._reset_intro_snake()
 
     def start_level(self):
@@ -1360,10 +1360,10 @@ class Game:
         top = 0
         bottom = max(top, rows - 1)
 
-        mid_y = (top + bottom) // 2
+        mid_y = min(bottom, (top + bottom) // 2 + 2)
         span = max(1, right - left)
-        amplitude = max(1, min(3, rows // 10))
-        waves = max(2, span // 16)
+        amplitude = 1
+        waves = max(5, span // 8)
 
         path: list[tuple[int, int]] = []
         prev_y = None
@@ -1432,9 +1432,9 @@ class Game:
         if not self.intro_path:
             return 1.0
         progress = self.intro_path_index / max(1, len(self.intro_path) - 1)
-        if progress <= 1.0 / 3.0:
+        if progress <= 1.0 / 4.0:
             return 0.0
-        return min(1.0, (progress - 1.0 / 3.0) / (2.0 / 3.0))
+        return min(1.0, (progress - 1.0 / 4.0) / (3.0 / 4.0))
 
     def _build_intro_snake_images(self) -> dict[str, list[pygame.Surface] | pygame.Surface] | None:
         if not self.intro_snake:
