@@ -60,6 +60,14 @@ class Game:
         self.sacrifice_left_cells: set[tuple[int, int]] | None = None
         self.sacrifice_right_cells: set[tuple[int, int]] | None = None
         self.sacrifice_wall_open = False
+        self.sacrifice_shot_active = False
+        self.sacrifice_shot_pos = (0.0, 0.0)
+        self.sacrifice_shot_dir = (0, 0)
+        self.sacrifice_shot_target = (0.0, 0.0)
+        self.sacrifice_shot_target_cell = (0, 0)
+        self.sacrifice_shot_speed = 18.0
+        self.sacrifice_shot_radius = max(2, int(TILE_SIZE * 0.35))
+        self.sacrifice_explosions: list[dict] = []
         self.loading_active = False
         self.loading_start_ms: int | None = None
         self.loading_duration_ms = 2000
@@ -123,10 +131,7 @@ class Game:
         if not self.layout_ready:
             self.build_walls()
         self.layout_ready = False
-        if self.playable_cells and self.snake.head not in self.playable_cells:
-            self.snake.segments[0] = random.choice(list(self.playable_cells))
-        if self._in_sacrifice_levels():
-            self._place_snake_in_sacrifice_start()
+        self._place_snake_for_level()
         self.place_gate_elements()
         self.spawn_food()
         self.level_food_eaten = 0
@@ -137,11 +142,68 @@ class Game:
         self.loading_reveal_count = 0
         self.last_frame_ms = None
         self.move_accumulator_ms = 0.0
+        self.sacrifice_shot_active = False
+        self.sacrifice_explosions.clear()
         self.level_clear = False
         self.game_paused = False
         self.story_active = False
         self.input_locked = False
         self.queued_direction = None
+
+    def _place_snake_for_level(self):
+        if not self.snake:
+            return
+
+        if self._in_sacrifice_levels():
+            self._place_snake_in_sacrifice_start()
+            return
+
+        if self.playable_cells:
+            candidates = [pos for pos in self.playable_cells if pos not in self.wall_positions]
+        else:
+            candidates = [
+                (x, y)
+                for x in range(GRID_WIDTH)
+                for y in range(GRID_HEIGHT)
+                if (x, y) not in self.wall_positions
+            ]
+
+        if not candidates:
+            return
+
+        spawn = self._choose_spawn_position(candidates, min_wall_gap=8)
+        self.snake.segments = [spawn]
+
+    def _choose_spawn_position(
+        self,
+        candidates: list[tuple[int, int]],
+        min_wall_gap: int,
+    ) -> tuple[int, int]:
+        safe_cells: list[tuple[int, int]] = []
+        best_cell = candidates[0]
+        best_distance = -1
+        for cell in candidates:
+            distance = self._distance_to_nearest_wall(cell)
+            if distance >= min_wall_gap:
+                safe_cells.append(cell)
+            if distance > best_distance:
+                best_distance = distance
+                best_cell = cell
+
+        if safe_cells:
+            return random.choice(safe_cells)
+
+        return best_cell
+
+    def _distance_to_nearest_wall(self, cell: tuple[int, int]) -> int:
+        if not self.wall_positions:
+            x, y = cell
+            return min(x, y, GRID_WIDTH - 1 - x, GRID_HEIGHT - 1 - y)
+
+        return min(
+            abs(cell[0] - wall[0]) + abs(cell[1] - wall[1])
+            for wall in self.wall_positions
+        )
 
 
     def start_game(self):
@@ -161,6 +223,8 @@ class Game:
         self.queued_direction = None
         self.level_clear = False
         self.game_paused = False
+        self.sacrifice_shot_active = False
+        self.sacrifice_explosions.clear()
         self.start_music()
         self.start_story(self.story_intro_text, "begin_loading")
 
@@ -363,10 +427,7 @@ class Game:
                             self.record_score()
                         elif event.key == pygame.K_SPACE:
                             self.record_score()
-                            self.game_over = False
-                            self.game_started = False
-                            self.menu_page = "main"
-                            self.stop_music()
+                            self.start_game()
                         elif event.key == pygame.K_BACKSPACE:
                             self.name_input = self.name_input[:-1]
                         elif event.key == pygame.K_ESCAPE:
@@ -378,10 +439,7 @@ class Game:
                                     self.name_input += event.unicode
                     else:
                         if event.key == pygame.K_SPACE:
-                            self.game_over = False
-                            self.game_started = False
-                            self.menu_page = "main"
-                            self.stop_music()
+                            self.start_game()
                         elif event.key == pygame.K_ESCAPE:
                             self.stop_music()
                             self.running = False
@@ -524,6 +582,8 @@ class Game:
             self.update_loading()
             return
 
+        self._update_sacrifice_shot(dt_ms)
+
         move_interval_ms = 1000 / max(1e-6, FPS * self.speed_multiplier)
         self.move_accumulator_ms += dt_ms
         while self.move_accumulator_ms >= move_interval_ms and not self.game_over:
@@ -664,6 +724,7 @@ class Game:
         self.screen.blit(self.background, (0, HUD_HEIGHT))
         draw_grid(self.screen, offset_y=HUD_HEIGHT)
         self.draw_walls()
+        self.draw_sacrifice_effects()
 
         if self.food:
             self.food.draw(self.screen, HUD_HEIGHT)
@@ -763,6 +824,38 @@ class Game:
                 pygame.draw.rect(self.screen, COLOR_WALL, rect)
             else:
                 pygame.draw.rect(self.screen, COLOR_WALL, rect, width=2, border_radius=4)
+
+    def draw_sacrifice_effects(self):
+        if not self._in_sacrifice_levels():
+            return
+
+        if self.sacrifice_shot_active:
+            x, y = self.sacrifice_shot_pos
+            center = (int(round(x * TILE_SIZE)), int(round(y * TILE_SIZE + HUD_HEIGHT)))
+            pygame.draw.circle(self.screen, COLOR_SNAKE, center, self.sacrifice_shot_radius)
+
+        if not self.sacrifice_explosions:
+            return
+
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        for explosion in self.sacrifice_explosions:
+            elapsed = explosion["elapsed"]
+            duration = max(1.0, explosion["duration"])
+            progress = min(1.0, max(0.0, elapsed / duration))
+            grid_x, grid_y = explosion["pos"]
+            center = (
+                grid_x * TILE_SIZE + TILE_SIZE // 2,
+                grid_y * TILE_SIZE + HUD_HEIGHT + TILE_SIZE // 2,
+            )
+            radius = int(TILE_SIZE * (0.2 + 0.9 * progress))
+            alpha = int(220 * (1.0 - progress))
+            color = (255, 210, 120, alpha)
+            pygame.draw.circle(overlay, color, center, radius, width=2)
+            flash_radius = max(1, int(TILE_SIZE * 0.12 * (1.0 - progress)))
+            if flash_radius > 0:
+                pygame.draw.circle(overlay, (255, 255, 255, alpha), center, flash_radius)
+
+        self.screen.blit(overlay, (0, 0))
 
     def draw_hud_band(self):
         if self.banner_image:
@@ -913,7 +1006,10 @@ class Game:
     def _place_snake_in_sacrifice_start(self):
         if not self.sacrifice_left_cells or not self.snake:
             return
-        start_pos = random.choice(list(self.sacrifice_left_cells))
+        candidates = [pos for pos in self.sacrifice_left_cells if pos not in self.wall_positions]
+        if not candidates:
+            candidates = list(self.sacrifice_left_cells)
+        start_pos = self._choose_spawn_position(candidates, min_wall_gap=8)
         self.snake.segments = [start_pos]
         self.snake.direction = (1, 0)
         self.snake.pending_direction = (1, 0)
@@ -924,6 +1020,8 @@ class Game:
         if self.sacrifice_ammo <= 0:
             return
         if not self.snake:
+            return
+        if self.sacrifice_shot_active:
             return
         if len(self.snake.segments) <= 1:
             return
@@ -948,6 +1046,8 @@ class Game:
         if hit_pos is None:
             return
 
+        self._start_sacrifice_shot(hit_pos, (dx, dy))
+
         self.breakable_wall_positions.discard(hit_pos)
         self.wall_positions.discard(hit_pos)
         if self.sacrifice_playable_cells is not None:
@@ -958,6 +1058,50 @@ class Game:
             self.snake.grow_pending -= 1
         elif len(self.snake.segments) > 1:
             self.snake.segments.pop()
+
+    def _start_sacrifice_shot(self, hit_pos: tuple[int, int], direction: tuple[int, int]):
+        if not self.snake:
+            return
+
+        head_x, head_y = self.snake.head
+        self.sacrifice_shot_active = True
+        self.sacrifice_shot_dir = direction
+        self.sacrifice_shot_pos = (head_x + 0.5, head_y + 0.5)
+        self.sacrifice_shot_target_cell = hit_pos
+        self.sacrifice_shot_target = (hit_pos[0] + 0.5, hit_pos[1] + 0.5)
+
+    def _update_sacrifice_shot(self, dt_ms: float):
+        if not self.sacrifice_shot_active and not self.sacrifice_explosions:
+            return
+
+        dt_sec = max(0.0, dt_ms / 1000.0)
+
+        if self.sacrifice_shot_active:
+            x, y = self.sacrifice_shot_pos
+            dx, dy = self.sacrifice_shot_dir
+            step = self.sacrifice_shot_speed * dt_sec
+            x += dx * step
+            y += dy * step
+
+            target_x, target_y = self.sacrifice_shot_target
+            reached_x = (dx >= 0 and x >= target_x) or (dx <= 0 and x <= target_x)
+            reached_y = (dy >= 0 and y >= target_y) or (dy <= 0 and y <= target_y)
+            if (dx != 0 and reached_x) or (dy != 0 and reached_y):
+                x, y = target_x, target_y
+                self.sacrifice_shot_active = False
+                self.sacrifice_explosions.append(
+                    {"pos": self.sacrifice_shot_target_cell, "elapsed": 0.0, "duration": 260.0}
+                )
+
+            self.sacrifice_shot_pos = (x, y)
+
+        if self.sacrifice_explosions:
+            updated: list[dict] = []
+            for explosion in self.sacrifice_explosions:
+                explosion["elapsed"] += dt_ms
+                if explosion["elapsed"] < explosion["duration"]:
+                    updated.append(explosion)
+            self.sacrifice_explosions = updated
 
     def _build_story_path(self) -> list[tuple[int, int]]:
         margin = 2
@@ -1258,9 +1402,9 @@ class Game:
 
         title_text = self.game_title_font.render("Game Over", True, COLOR_HUD)
         if not self.score_recorded:
-            prompt_label = "Press ENTER to save, SPACE to skip, ESC to exit"
+            prompt_label = "Play again? SPACE | ENTER to save | ESC to exit"
         else:
-            prompt_label = "Press SPACE for main menu or ESC to exit"
+            prompt_label = "Play again? SPACE | ESC to exit"
         prompt_text = self.game_font.render(prompt_label, True, COLOR_HUD)
 
         title_rect = title_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 20))
@@ -1275,7 +1419,7 @@ class Game:
             self.screen.blit(name_text, name_rect)
 
             hint_text = self.menu_prompt_font.render(
-                "Type your name, ENTER to save, SPACE to skip",
+                "Type your name, ENTER to save, SPACE to play again",
                 True,
                 COLOR_HUD,
             )

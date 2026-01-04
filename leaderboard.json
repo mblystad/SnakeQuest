@@ -1,6 +1,10 @@
 {
   "entries": [
     {
+      "name": "nn",
+      "score": 70
+    },
+    {
       "name": "Anon",
       "score": 6
     },
@@ -15,10 +19,6 @@
     {
       "name": "Anon",
       "score": 4
-    },
-    {
-      "name": "Anon",
-      "score": 3
     }
   ]
 }

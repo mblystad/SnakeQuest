@@ -32,7 +32,7 @@ python main.py
 - **Sacrifice levels**: `S` to shoot a segment (consumes ammo), use arrow keys to move down while shooting is enabled.
 - **Paused**: `Enter` to resume, `Esc` returns to main menu.
 - **Level Clear**: `Space` to continue, `Esc` exits.
-- **Game Over**: type name (letters/numbers only, max 10 chars) + `Enter` to save score, `Space` skips to menu, `Esc` exits.
+- **Game Over**: type name (letters/numbers only, max 10 chars) + `Enter` to save score, `Space` plays again, `Esc` exits.
 
 ## Leaderboard
 - Stored in `leaderboard.json` (auto-created on the first game over).
