@@ -1361,14 +1361,15 @@ class Game:
         bottom = max(top, rows - 1)
 
         mid_y = (top + bottom) // 2
-        amplitude = max(2, (bottom - top) // 2)
         span = max(1, right - left)
+        amplitude = max(1, min(3, rows // 10))
+        waves = max(2, span // 16)
 
         path: list[tuple[int, int]] = []
         prev_y = None
         for x in range(left, right + 1):
             t = (x - left) / span
-            y_float = mid_y + amplitude * math.sin(t * math.tau - math.pi / 2)
+            y_float = mid_y + amplitude * math.sin(t * math.tau * waves)
             target_y = int(round(y_float))
             target_y = max(top, min(bottom, target_y))
             if prev_y is None:
@@ -1645,7 +1646,9 @@ class Game:
             self.draw_intro_screen()
             return
 
-        if self.start_bg:
+        if self.intro_done and self.start_bg_alt:
+            self.screen.blit(self.start_bg_alt, (0, 0))
+        elif self.start_bg:
             self.screen.blit(self.start_bg, (0, 0))
         else:
             self.screen.blit(self.menu_background, (0, 0))
