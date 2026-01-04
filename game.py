@@ -1,5 +1,6 @@
 import json
 import random
+from collections import deque
 from pathlib import Path
 import pygame
 from config import (
@@ -70,6 +71,7 @@ class Game:
         self.sacrifice_shot_target_cell = (0, 0)
         self.sacrifice_shot_speed = 18.0
         self.sacrifice_shot_radius = max(2, int(TILE_SIZE * 0.35))
+        self.sacrifice_shot_hit_radius = 0.2
         self.sacrifice_explosions: list[dict] = []
         self.loading_active = False
         self.loading_start_ms: int | None = None
@@ -377,10 +379,8 @@ class Game:
     def spawn_food(self):
         assert self.food is not None and self.snake is not None
         if self._in_sacrifice_levels() and self.sacrifice_playable_cells:
-            if self.sacrifice_wall_open:
-                candidates = list(self.sacrifice_playable_cells)
-            else:
-                candidates = list(self.sacrifice_left_cells or self.sacrifice_playable_cells)
+            candidates_set = self._sacrifice_spawn_candidates()
+            candidates = list(candidates_set or self.sacrifice_playable_cells)
             random.shuffle(candidates)
             for candidate in candidates:
                 if candidate in self.snake.segments:
@@ -417,6 +417,40 @@ class Game:
                 continue
             self.food.position = candidate
             break
+
+    def _sacrifice_spawn_candidates(self) -> set[tuple[int, int]] | None:
+        if not self.sacrifice_playable_cells:
+            return None
+        if self.sacrifice_wall_open:
+            return self.sacrifice_playable_cells
+        if self.snake and self.snake.head in self.sacrifice_playable_cells:
+            reachable = self._flood_fill_sacrifice(self.snake.head)
+            if reachable:
+                return reachable
+        return self.sacrifice_left_cells or self.sacrifice_playable_cells
+
+    def _flood_fill_sacrifice(self, start: tuple[int, int]) -> set[tuple[int, int]]:
+        visited: set[tuple[int, int]] = set()
+        if not self.sacrifice_playable_cells:
+            return visited
+        if start not in self.sacrifice_playable_cells:
+            return visited
+        queue: deque[tuple[int, int]] = deque([start])
+        visited.add(start)
+        while queue:
+            x, y = queue.popleft()
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nx, ny = x + dx, y + dy
+                pos = (nx, ny)
+                if pos in visited:
+                    continue
+                if pos not in self.sacrifice_playable_cells:
+                    continue
+                if pos in self.wall_positions:
+                    continue
+                visited.add(pos)
+                queue.append(pos)
+        return visited
 
     def handle_events(self):
         for event in pygame.event.get():
@@ -1085,10 +1119,8 @@ class Game:
         y = head_y + dy
         hit_pos = None
         while 0 <= x < GRID_WIDTH and 0 <= y < GRID_HEIGHT:
-            if (x, y) in self.breakable_wall_positions:
-                hit_pos = (x, y)
-                break
             if (x, y) in self.wall_positions:
+                hit_pos = (x, y)
                 break
             x += dx
             y += dy
@@ -1098,11 +1130,6 @@ class Game:
 
         self._start_sacrifice_shot(hit_pos, (dx, dy))
 
-        self.breakable_wall_positions.discard(hit_pos)
-        self.wall_positions.discard(hit_pos)
-        if self.sacrifice_playable_cells is not None:
-            self.sacrifice_playable_cells.add(hit_pos)
-        self.sacrifice_wall_open = True
         self.sacrifice_ammo -= 1
         if self.snake.grow_pending > 0:
             self.snake.grow_pending -= 1
@@ -1130,18 +1157,32 @@ class Game:
             x, y = self.sacrifice_shot_pos
             dx, dy = self.sacrifice_shot_dir
             step = self.sacrifice_shot_speed * dt_sec
+            prev_x, prev_y = x, y
             x += dx * step
             y += dy * step
 
             target_x, target_y = self.sacrifice_shot_target
-            reached_x = (dx >= 0 and x >= target_x) or (dx <= 0 and x <= target_x)
-            reached_y = (dy >= 0 and y >= target_y) or (dy <= 0 and y <= target_y)
-            if (dx != 0 and reached_x) or (dy != 0 and reached_y):
-                x, y = target_x, target_y
+            hit_radius = self.sacrifice_shot_hit_radius
+            hit = False
+            if dx != 0:
+                hit_line = target_x - dx * hit_radius
+                crossed = (dx > 0 and prev_x <= hit_line <= x) or (dx < 0 and prev_x >= hit_line >= x)
+                if crossed and abs(y - target_y) <= hit_radius + 1e-6:
+                    x = hit_line
+                    hit = True
+            elif dy != 0:
+                hit_line = target_y - dy * hit_radius
+                crossed = (dy > 0 and prev_y <= hit_line <= y) or (dy < 0 and prev_y >= hit_line >= y)
+                if crossed and abs(x - target_x) <= hit_radius + 1e-6:
+                    y = hit_line
+                    hit = True
+
+            if hit:
                 self.sacrifice_shot_active = False
                 self.sacrifice_explosions.append(
                     {"pos": self.sacrifice_shot_target_cell, "elapsed": 0.0, "duration": 260.0}
                 )
+                self._resolve_sacrifice_shot_hit()
 
             self.sacrifice_shot_pos = (x, y)
 
@@ -1152,6 +1193,15 @@ class Game:
                 if explosion["elapsed"] < explosion["duration"]:
                     updated.append(explosion)
             self.sacrifice_explosions = updated
+
+    def _resolve_sacrifice_shot_hit(self):
+        hit_pos = self.sacrifice_shot_target_cell
+        if hit_pos in self.breakable_wall_positions:
+            self.breakable_wall_positions.discard(hit_pos)
+            self.wall_positions.discard(hit_pos)
+            if self.sacrifice_playable_cells is not None:
+                self.sacrifice_playable_cells.add(hit_pos)
+            self.sacrifice_wall_open = True
 
     def _build_story_path(self) -> list[tuple[int, int]]:
         margin = 2
