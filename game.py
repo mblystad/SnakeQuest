@@ -137,7 +137,10 @@ class Game:
         self.intro_path = self._build_intro_path()
         self.intro_path_index = 0
         self.intro_snake_length = 12
+        self.intro_snake_scale = 1.5
+        self.intro_snake_tile = max(4, int(round(TILE_SIZE * self.intro_snake_scale)))
         self.intro_snake: Snake | None = None
+        self.intro_snake_images: dict[str, list[pygame.Surface] | pygame.Surface] | None = None
         self.intro_last_frame_ms: int | None = None
         self.intro_move_accumulator_ms = 0.0
         self.intro_move_interval_ms = 90
@@ -901,8 +904,7 @@ class Game:
             self.screen.blit(self.start_bg_alt, (0, 0))
             self.start_bg_alt.set_alpha(255)
 
-        if self.intro_snake:
-            self.intro_snake.draw(self.screen, offset_y=0, alpha=0.0)
+        self._draw_intro_snake_scaled()
 
         prompt_text = self.menu_prompt_font.render("Press any key to skip", True, COLOR_HUD)
         prompt_rect = prompt_text.get_rect(midbottom=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 18))
@@ -1353,20 +1355,20 @@ class Game:
     def _build_intro_path(self) -> list[tuple[int, int]]:
         cols = max(1, SCREEN_WIDTH // TILE_SIZE)
         rows = max(1, SCREEN_HEIGHT // TILE_SIZE)
-        left = 1
-        right = max(left, cols - 2)
-        top = 1
-        bottom = max(top, rows - 2)
+        left = 0
+        right = max(left, cols - 1)
+        top = 0
+        bottom = max(top, rows - 1)
 
         mid_y = (top + bottom) // 2
-        amplitude = max(2, (bottom - top) // 2 - 1)
+        amplitude = max(2, (bottom - top) // 2)
         span = max(1, right - left)
 
         path: list[tuple[int, int]] = []
         prev_y = None
         for x in range(left, right + 1):
             t = (x - left) / span
-            y_float = mid_y + amplitude * math.sin(t * math.tau)
+            y_float = mid_y + amplitude * math.sin(t * math.tau - math.pi / 2)
             target_y = int(round(y_float))
             target_y = max(top, min(bottom, target_y))
             if prev_y is None:
@@ -1386,6 +1388,7 @@ class Game:
         if not self.intro_path:
             self.intro_snake = Snake(grid_pos=(GRID_WIDTH // 2, GRID_HEIGHT // 2))
             self.intro_snake_length = max(4, self.intro_snake_length)
+            self.intro_snake_images = self._build_intro_snake_images()
             return
 
         self.intro_path_index = 0
@@ -1396,6 +1399,7 @@ class Game:
         if len(positions) > 1:
             self.intro_snake.direction = (1, 0)
             self.intro_snake.pending_direction = (1, 0)
+        self.intro_snake_images = self._build_intro_snake_images()
 
     def _advance_intro_snake(self):
         if not self.intro_snake or not self.intro_path:
@@ -1430,6 +1434,68 @@ class Game:
         if progress <= 1.0 / 3.0:
             return 0.0
         return min(1.0, (progress - 1.0 / 3.0) / (2.0 / 3.0))
+
+    def _build_intro_snake_images(self) -> dict[str, list[pygame.Surface] | pygame.Surface] | None:
+        if not self.intro_snake:
+            return None
+
+        size = self.intro_snake_tile
+        head_frames = [
+            pygame.transform.smoothscale(frame, (size, size))
+            for frame in (self.intro_snake.head_frames or [])
+        ]
+        body = pygame.transform.smoothscale(self.intro_snake.body_image, (size, size))
+        throat = pygame.transform.smoothscale(self.intro_snake.throat_image, (size, size))
+        tail = pygame.transform.smoothscale(self.intro_snake.tail_image, (size, size))
+        return {
+            "head_frames": head_frames,
+            "body": body,
+            "throat": throat,
+            "tail": tail,
+        }
+
+    def _draw_intro_snake_scaled(self):
+        if not self.intro_snake or not self.intro_snake_images:
+            return
+
+        head_frames = self.intro_snake_images.get("head_frames") or []
+        body_image = self.intro_snake_images.get("body")
+        throat_image = self.intro_snake_images.get("throat")
+        tail_image = self.intro_snake_images.get("tail")
+        if not head_frames or body_image is None or throat_image is None or tail_image is None:
+            return
+
+        half = self.intro_snake_tile / 2
+        max_x = SCREEN_WIDTH - half
+        max_y = SCREEN_HEIGHT - half
+
+        for index, (x, y) in enumerate(self.intro_snake.segments):
+            center_x = x * TILE_SIZE + TILE_SIZE / 2
+            center_y = y * TILE_SIZE + TILE_SIZE / 2
+            center_x = max(half, min(max_x, center_x))
+            center_y = max(half, min(max_y, center_y))
+            center = (int(round(center_x)), int(round(center_y)))
+
+            if index == 0:
+                frame = head_frames[self.intro_snake.anim_index % len(head_frames)]
+                angle = self.intro_snake._direction_to_angle(self.intro_snake.pending_direction)
+                oriented = pygame.transform.rotate(frame, angle) if angle else frame
+                rect = oriented.get_rect(center=center)
+                self.screen.blit(oriented, rect)
+            elif index == len(self.intro_snake.segments) - 1:
+                cur_x, cur_y = self.intro_snake.segments[index]
+                prev_x, prev_y = self.intro_snake.segments[index - 1]
+                dx, dy = cur_x - prev_x, cur_y - prev_y
+                angle = self.intro_snake._direction_to_angle((dx, dy))
+                oriented = pygame.transform.rotate(tail_image, angle) if angle else tail_image
+                rect = oriented.get_rect(center=center)
+                self.screen.blit(oriented, rect)
+            else:
+                angle = self.intro_snake._body_angle(index)
+                segment_image = throat_image if index == 1 else body_image
+                oriented = pygame.transform.rotate(segment_image, angle) if angle else segment_image
+                rect = oriented.get_rect(center=center)
+                self.screen.blit(oriented, rect)
 
     def _build_tetris_arena(self) -> set[tuple[int, int]]:
         """Create a full-arena Tetris-shaped playfield."""
