@@ -50,6 +50,9 @@ class Game:
         self.key_image = load_scaled_image("key.png", (TILE_SIZE, TILE_SIZE))
         self.start_bg = load_scaled_image("menubg.png", (SCREEN_WIDTH, SCREEN_HEIGHT))
         self.banner_image = load_scaled_image("banner.png", (SCREEN_WIDTH, HUD_HEIGHT))
+        self.sacrifice_shot_size = max(4, int(TILE_SIZE * 0.7))
+        self.sacrifice_shot_corner = max(2, int(self.sacrifice_shot_size * 0.3))
+        self.sacrifice_shot_images = self._build_sacrifice_shot_images()
 
         self.game_started = False
         self.game_over = False
@@ -825,14 +828,48 @@ class Game:
             else:
                 pygame.draw.rect(self.screen, COLOR_WALL, rect, width=2, border_radius=4)
 
+    def _build_sacrifice_shot_images(self) -> dict[tuple[int, int], pygame.Surface]:
+        size = self.sacrifice_shot_size
+        corner = self.sacrifice_shot_corner
+        base = load_scaled_image("segment.png", (size, size))
+        if base is None:
+            base = pygame.Surface((size, size), pygame.SRCALPHA)
+            pygame.draw.rect(base, COLOR_SNAKE, base.get_rect(), border_radius=corner)
+            return {
+                (1, 0): base,
+                (-1, 0): base,
+                (0, -1): base,
+                (0, 1): base,
+            }
+
+        rounded = base.copy()
+        mask = pygame.Surface((size, size), pygame.SRCALPHA)
+        pygame.draw.rect(mask, (255, 255, 255, 255), mask.get_rect(), border_radius=corner)
+        rounded.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+
+        images: dict[tuple[int, int], pygame.Surface] = {}
+        for direction in ((1, 0), (-1, 0), (0, -1), (0, 1)):
+            angle = self._direction_to_angle(direction)
+            images[direction] = pygame.transform.rotate(rounded, angle) if angle else rounded
+        return images
+
     def draw_sacrifice_effects(self):
         if not self._in_sacrifice_levels():
             return
 
         if self.sacrifice_shot_active:
             x, y = self.sacrifice_shot_pos
-            center = (int(round(x * TILE_SIZE)), int(round(y * TILE_SIZE + HUD_HEIGHT)))
-            pygame.draw.circle(self.screen, COLOR_SNAKE, center, self.sacrifice_shot_radius)
+            center_x = int(round(x * TILE_SIZE))
+            center_y = int(round(y * TILE_SIZE + HUD_HEIGHT))
+            dx, dy = self.sacrifice_shot_dir
+            lead = int(TILE_SIZE * 0.35)
+            center = (center_x + dx * lead, center_y + dy * lead)
+            image = self.sacrifice_shot_images.get((dx, dy)) if self.sacrifice_shot_images else None
+            if image:
+                rect = image.get_rect(center=center)
+                self.screen.blit(image, rect)
+            else:
+                pygame.draw.circle(self.screen, COLOR_SNAKE, center, self.sacrifice_shot_radius)
 
         if not self.sacrifice_explosions:
             return
@@ -889,6 +926,19 @@ class Game:
     def play_sound(self, name: str):
         """Safe sound hook (no-op if audio assets are missing)."""
         return
+
+    @staticmethod
+    def _direction_to_angle(direction: tuple[int, int]) -> int:
+        dx, dy = direction
+        if dx == 1 and dy == 0:
+            return 0
+        if dx == -1 and dy == 0:
+            return 180
+        if dx == 0 and dy == -1:
+            return 90
+        if dx == 0 and dy == 1:
+            return -90
+        return 0
 
     def _direction_valid(self, new_dir: tuple[int, int], current_dir: tuple[int, int]) -> bool:
         cur_dx, cur_dy = current_dir
