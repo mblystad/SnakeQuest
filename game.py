@@ -1,5 +1,4 @@
 import json
-import math
 import random
 from collections import deque
 from pathlib import Path
@@ -134,17 +133,19 @@ class Game:
         self.story_end_text = "Placeholder sacrifice intro"
         self.intro_active = True
         self.intro_done = False
-        self.intro_path = self._build_intro_path()
-        self.intro_path_index = 0
-        self.intro_snake_length = 12
-        self.intro_snake_scale = 2.25
-        self.intro_snake_tile = max(4, int(round(TILE_SIZE * self.intro_snake_scale)))
+        self.intro_phase = "veil"
+        self.intro_snake_length = 10
+        self.intro_veil_snakes: list[Snake] = []
+        self.intro_veil_steps = 0
+        self.intro_veil_total_steps = 0
+        self.intro_hero_target_x = 0
+        self.intro_hero_row = 0
+        self.intro_hero_done = False
         self.intro_snake: Snake | None = None
-        self.intro_snake_images: dict[str, list[pygame.Surface] | pygame.Surface] | None = None
         self.intro_last_frame_ms: int | None = None
         self.intro_move_accumulator_ms = 0.0
-        self.intro_move_interval_ms = 65
-        self._reset_intro_snake()
+        self.intro_move_interval_ms = 62
+        self._reset_intro_sequence()
 
     def start_level(self):
         """Set up a fresh level layout with increasing gate spacing."""
@@ -197,6 +198,7 @@ class Game:
 
         spawn = self._choose_spawn_position(candidates, min_wall_gap=8)
         self.snake.segments = [spawn]
+        self.snake.reset_interpolation()
 
     def _choose_spawn_position(
         self,
@@ -527,6 +529,7 @@ class Game:
                 if not self.game_started and self.menu_page == "main" and self.intro_active:
                     self.intro_active = False
                     self.intro_done = True
+                    self._place_intro_hero()
                     continue
 
                 if not self.game_started:
@@ -670,10 +673,11 @@ class Game:
             self.update_loading()
             return
 
-        self._update_sacrifice_shot(dt_ms)
-
         move_interval_ms = 1000 / max(1e-6, FPS * self.speed_multiplier)
         self.move_accumulator_ms += dt_ms
+        self._update_sacrifice_shot(dt_ms)
+        updates = 0
+        max_updates = 5
         while self.move_accumulator_ms >= move_interval_ms and not self.game_over:
             self.move_accumulator_ms -= move_interval_ms
             self.snake.update()
@@ -686,6 +690,10 @@ class Game:
             self.check_collisions()
             self.check_food_eaten()
             self.check_key_reached()
+            updates += 1
+            if updates >= max_updates:
+                self.move_accumulator_ms = 0.0
+                break
 
     def update_story(self):
         now_ms = pygame.time.get_ticks()
@@ -694,11 +702,18 @@ class Game:
         dt_ms = now_ms - self.story_last_frame_ms
         self.story_last_frame_ms = now_ms
         dt_ms = min(dt_ms, 200)
+        dt_ms = min(dt_ms, self.story_move_interval_ms)
 
         self.story_move_accumulator_ms += dt_ms
+        updates = 0
+        max_updates = 4
         while self.story_move_accumulator_ms >= self.story_move_interval_ms:
             self.story_move_accumulator_ms -= self.story_move_interval_ms
             self._advance_story_snake()
+            updates += 1
+            if updates >= max_updates:
+                self.story_move_accumulator_ms = 0.0
+                break
 
     def update_intro(self):
         now_ms = pygame.time.get_ticks()
@@ -707,11 +722,21 @@ class Game:
         dt_ms = now_ms - self.intro_last_frame_ms
         self.intro_last_frame_ms = now_ms
         dt_ms = min(dt_ms, 200)
+        dt_ms = min(dt_ms, self.intro_move_interval_ms)
 
         self.intro_move_accumulator_ms += dt_ms
+        updates = 0
+        max_updates = 4
         while self.intro_move_accumulator_ms >= self.intro_move_interval_ms:
             self.intro_move_accumulator_ms -= self.intro_move_interval_ms
-            self._advance_intro_snake()
+            if self.intro_phase == "veil":
+                self._advance_intro_veil()
+            else:
+                self._advance_intro_hero()
+            updates += 1
+            if updates >= max_updates:
+                self.intro_move_accumulator_ms = 0.0
+                break
 
     def check_collisions(self):
         head_x, head_y = self.snake.head
@@ -834,7 +859,7 @@ class Game:
         move_interval_ms = 1000 / max(1e-6, FPS * self.speed_multiplier)
         alpha = 0.0
         if move_interval_ms > 0:
-            alpha = min(1.0, self.move_accumulator_ms / move_interval_ms)
+            alpha = min(1.0, max(0.0, self.move_accumulator_ms / move_interval_ms))
         if self.snake:
             self.snake.draw(self.screen, HUD_HEIGHT, alpha=alpha)
 
@@ -866,7 +891,11 @@ class Game:
         draw_grid(self.screen, offset_y=HUD_HEIGHT)
 
         if self.story_snake:
-            self.story_snake.draw(self.screen, HUD_HEIGHT, alpha=0.0)
+            alpha = self._movement_alpha(
+                self.story_move_accumulator_ms,
+                self.story_move_interval_ms,
+            )
+            self.story_snake.draw(self.screen, HUD_HEIGHT, alpha=alpha)
 
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 190))
@@ -904,7 +933,18 @@ class Game:
             self.screen.blit(self.start_bg_alt, (0, 0))
             self.start_bg_alt.set_alpha(255)
 
-        self._draw_intro_snake_scaled()
+        intro_alpha = self._movement_alpha(
+            self.intro_move_accumulator_ms,
+            self.intro_move_interval_ms,
+        )
+        if self.intro_phase == "veil":
+            for snake in self.intro_veil_snakes:
+                snake.draw(self.screen, 0, alpha=intro_alpha)
+        else:
+            if self.intro_hero_done:
+                intro_alpha = 0.0
+            if self.intro_snake:
+                self.intro_snake.draw(self.screen, 0, alpha=intro_alpha)
 
         prompt_text = self.menu_prompt_font.render("Press any key to skip", True, COLOR_HUD)
         prompt_rect = prompt_text.get_rect(midbottom=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 18))
@@ -1058,6 +1098,17 @@ class Game:
             return -90
         return 0
 
+    @staticmethod
+    def _ease_out_alpha(alpha: float) -> float:
+        alpha = max(0.0, min(1.0, alpha))
+        return 1.0 - (1.0 - alpha) * (1.0 - alpha)
+
+    def _movement_alpha(self, accumulator_ms: float, interval_ms: float) -> float:
+        if interval_ms <= 0:
+            return 1.0
+        raw = min(1.0, max(0.0, accumulator_ms / interval_ms))
+        return raw
+
     def _direction_valid(self, new_dir: tuple[int, int], current_dir: tuple[int, int]) -> bool:
         cur_dx, cur_dy = current_dir
         new_dx, new_dy = new_dir
@@ -1181,6 +1232,7 @@ class Game:
         self.snake.segments = [start_pos]
         self.snake.direction = (1, 0)
         self.snake.pending_direction = (1, 0)
+        self.snake.reset_interpolation()
 
     def shoot_sacrifice(self):
         if not self._in_sacrifice_levels():
@@ -1314,6 +1366,8 @@ class Game:
         if not self.story_path:
             self.story_snake = Snake(grid_pos=(GRID_WIDTH // 2, GRID_HEIGHT // 2))
             self.story_snake_length = max(3, self.story_snake_length)
+            if self.story_snake:
+                self.story_snake.reset_interpolation()
             return
 
         self.story_path_index = 0
@@ -1330,10 +1384,15 @@ class Game:
             dx, dy = head_x - next_x, head_y - next_y
             self.story_snake.direction = (dx, dy)
             self.story_snake.pending_direction = (dx, dy)
+        if self.story_snake:
+            self.story_snake.reset_interpolation()
 
     def _advance_story_snake(self):
         if not self.story_snake or not self.story_path:
             return
+
+        self.story_snake.prev_segments = list(self.story_snake.segments)
+        self.story_snake.prev_direction = self.story_snake.direction
 
         self.story_path_index = (self.story_path_index + 1) % len(self.story_path)
         new_head = self.story_path[self.story_path_index]
@@ -1351,152 +1410,141 @@ class Game:
             self.story_snake.anim_index = (self.story_snake.anim_index + 1) % len(
                 self.story_snake.head_frames
             )
+        self.story_snake.interp_ready = True
 
-    def _build_intro_path(self) -> list[tuple[int, int]]:
+    def _reset_intro_sequence(self):
+        self.intro_phase = "veil"
+        self.intro_done = False
+        self.intro_active = True
+        self.intro_last_frame_ms = None
+        self.intro_move_accumulator_ms = 0.0
+        self.intro_veil_snakes = self._build_intro_veil()
+        self.intro_veil_steps = 0
+        self.intro_hero_done = False
+        self.intro_snake = None
+
+    def _intro_grid(self) -> tuple[int, int]:
         cols = max(1, SCREEN_WIDTH // TILE_SIZE)
         rows = max(1, SCREEN_HEIGHT // TILE_SIZE)
-        left = 0
-        right = max(left, cols - 1)
-        top = 0
-        bottom = max(top, rows - 1)
+        return cols, rows
 
-        mid_y = min(bottom, (top + bottom) // 2 + 2)
-        span = max(1, right - left)
-        amplitude = 1
-        waves = max(5, span // 8)
+    def _build_intro_veil(self) -> list[Snake]:
+        cols, rows = self._intro_grid()
+        snakes: list[Snake] = []
+        max_offset = 0
+        max_length = 0
+        for row in range(1, rows - 1, 2):
+            length = 6 + (row % 5)
+            offset = (row * 3) % 10
+            start_x = -length - offset
+            positions = [(start_x - i, row) for i in range(length)]
+            snake = Snake(grid_pos=positions[0])
+            snake.segments = positions
+            snake.direction = (1, 0)
+            snake.pending_direction = (1, 0)
+            snake.reset_interpolation()
+            snakes.append(snake)
+            max_offset = max(max_offset, offset)
+            max_length = max(max_length, length)
 
-        path: list[tuple[int, int]] = []
-        prev_y = None
-        for x in range(left, right + 1):
-            t = (x - left) / span
-            y_float = mid_y + amplitude * math.sin(t * math.tau * waves)
-            target_y = int(round(y_float))
-            target_y = max(top, min(bottom, target_y))
-            if prev_y is None:
-                path.append((x, target_y))
-                prev_y = target_y
-                continue
+        extra_snakes = 40
+        if rows > 2:
+            for _ in range(extra_snakes):
+                row = random.randint(1, rows - 2)
+                length = random.randint(6, 10)
+                offset = random.randint(0, 10)
+                start_x = -length - offset
+                positions = [(start_x - i, row) for i in range(length)]
+                snake = Snake(grid_pos=positions[0])
+                snake.segments = positions
+                snake.direction = (1, 0)
+                snake.pending_direction = (1, 0)
+                snake.reset_interpolation()
+                snakes.append(snake)
+                max_offset = max(max_offset, offset)
+                max_length = max(max_length, length)
 
-            path.append((x, prev_y))
-            step = 1 if target_y > prev_y else -1
-            while prev_y != target_y:
-                prev_y += step
-                path.append((x, prev_y))
+        self.intro_veil_total_steps = cols + max_offset + max_length + 2
+        return snakes
 
-        return path
-
-    def _reset_intro_snake(self):
-        if not self.intro_path:
-            self.intro_snake = Snake(grid_pos=(GRID_WIDTH // 2, GRID_HEIGHT // 2))
-            self.intro_snake_length = max(4, self.intro_snake_length)
-            self.intro_snake_images = self._build_intro_snake_images()
+    def _advance_intro_veil(self):
+        if not self.intro_veil_snakes:
+            self._start_intro_hero()
             return
 
-        self.intro_path_index = 0
-        start_pos = self.intro_path[0]
-        positions = [start_pos for _ in range(self.intro_snake_length)]
-        self.intro_snake = Snake(grid_pos=start_pos)
+        self.intro_veil_steps += 1
+        for snake in self.intro_veil_snakes:
+            snake.update()
+
+        if self.intro_veil_steps >= self.intro_veil_total_steps:
+            self._start_intro_hero()
+
+    def _start_intro_hero(self):
+        self.intro_phase = "hero"
+        cols, rows = self._intro_grid()
+        base_row = min(rows - 3, max(2, int(rows * 0.62)))
+        self.intro_hero_row = min(rows - 3, base_row + 1)
+        length = max(6, self.intro_snake_length)
+        target_x = max(3, int(cols * 0.5))
+        target_x = min(target_x, max(3, cols - length - 2))
+        target_x = max(3, target_x - length)
+        self.intro_hero_target_x = target_x
+        start_x = cols + length + 2
+        positions = [(start_x - i, self.intro_hero_row) for i in range(length)]
+        self.intro_snake = Snake(grid_pos=positions[0])
         self.intro_snake.segments = positions
-        if len(positions) > 1:
-            self.intro_snake.direction = (1, 0)
-            self.intro_snake.pending_direction = (1, 0)
-        self.intro_snake_images = self._build_intro_snake_images()
+        self.intro_snake.direction = (-1, 0)
+        self.intro_snake.pending_direction = (-1, 0)
+        self.intro_snake.reset_interpolation()
+        self.intro_hero_done = False
 
-    def _advance_intro_snake(self):
-        if not self.intro_snake or not self.intro_path:
+    def _advance_intro_hero(self):
+        if not self.intro_snake:
             return
 
-        if self.intro_path_index >= len(self.intro_path) - 1:
+        if self.intro_hero_done:
+            if self.intro_snake.head_frames:
+                self.intro_snake.anim_index = (self.intro_snake.anim_index + 1) % len(
+                    self.intro_snake.head_frames
+                )
+            return
+
+        head_x, _ = self.intro_snake.head
+        if head_x <= self.intro_hero_target_x:
+            self.intro_hero_done = True
+            self.intro_snake.reset_interpolation()
             self.intro_active = False
             self.intro_done = True
             return
 
-        self.intro_path_index += 1
-        new_head = self.intro_path[self.intro_path_index]
-        old_head = self.intro_snake.segments[0]
-        dx, dy = new_head[0] - old_head[0], new_head[1] - old_head[1]
-        if (dx, dy) != (0, 0):
-            self.intro_snake.direction = (dx, dy)
-            self.intro_snake.pending_direction = (dx, dy)
+        self.intro_snake.pending_direction = (-1, 0)
+        self.intro_snake.update()
 
-        self.intro_snake.segments.insert(0, new_head)
-        if len(self.intro_snake.segments) > self.intro_snake_length:
-            self.intro_snake.segments.pop()
-
-        if self.intro_snake.head_frames:
-            self.intro_snake.anim_index = (self.intro_snake.anim_index + 1) % len(
-                self.intro_snake.head_frames
-            )
+    def _place_intro_hero(self):
+        self.intro_phase = "hero"
+        cols, rows = self._intro_grid()
+        base_row = min(rows - 3, max(2, int(rows * 0.62)))
+        self.intro_hero_row = min(rows - 3, base_row + 1)
+        length = max(6, self.intro_snake_length)
+        target_x = max(3, int(cols * 0.5))
+        target_x = min(target_x, max(3, cols - length - 2))
+        target_x = max(3, target_x - length)
+        self.intro_hero_target_x = target_x
+        positions = [(target_x + i, self.intro_hero_row) for i in range(length)]
+        self.intro_snake = Snake(grid_pos=positions[0])
+        self.intro_snake.segments = positions
+        self.intro_snake.direction = (-1, 0)
+        self.intro_snake.pending_direction = (-1, 0)
+        self.intro_snake.reset_interpolation()
+        self.intro_hero_done = True
 
     def _intro_fade_progress(self) -> float:
-        if not self.intro_path:
-            return 1.0
-        progress = self.intro_path_index / max(1, len(self.intro_path) - 1)
-        if progress <= 1.0 / 4.0:
-            return 0.0
-        return min(1.0, (progress - 1.0 / 4.0) / (3.0 / 4.0))
-
-    def _build_intro_snake_images(self) -> dict[str, list[pygame.Surface] | pygame.Surface] | None:
-        if not self.intro_snake:
-            return None
-
-        size = self.intro_snake_tile
-        head_frames = [
-            pygame.transform.smoothscale(frame, (size, size))
-            for frame in (self.intro_snake.head_frames or [])
-        ]
-        body = pygame.transform.smoothscale(self.intro_snake.body_image, (size, size))
-        throat = pygame.transform.smoothscale(self.intro_snake.throat_image, (size, size))
-        tail = pygame.transform.smoothscale(self.intro_snake.tail_image, (size, size))
-        return {
-            "head_frames": head_frames,
-            "body": body,
-            "throat": throat,
-            "tail": tail,
-        }
-
-    def _draw_intro_snake_scaled(self):
-        if not self.intro_snake or not self.intro_snake_images:
-            return
-
-        head_frames = self.intro_snake_images.get("head_frames") or []
-        body_image = self.intro_snake_images.get("body")
-        throat_image = self.intro_snake_images.get("throat")
-        tail_image = self.intro_snake_images.get("tail")
-        if not head_frames or body_image is None or throat_image is None or tail_image is None:
-            return
-
-        half = self.intro_snake_tile / 2
-        max_x = SCREEN_WIDTH - half
-        max_y = SCREEN_HEIGHT - half
-
-        for index, (x, y) in enumerate(self.intro_snake.segments):
-            center_x = x * TILE_SIZE + TILE_SIZE / 2
-            center_y = y * TILE_SIZE + TILE_SIZE / 2
-            center_x = max(half, min(max_x, center_x))
-            center_y = max(half, min(max_y, center_y))
-            center = (int(round(center_x)), int(round(center_y)))
-
-            if index == 0:
-                frame = head_frames[self.intro_snake.anim_index % len(head_frames)]
-                angle = self.intro_snake._direction_to_angle(self.intro_snake.pending_direction)
-                oriented = pygame.transform.rotate(frame, angle) if angle else frame
-                rect = oriented.get_rect(center=center)
-                self.screen.blit(oriented, rect)
-            elif index == len(self.intro_snake.segments) - 1:
-                cur_x, cur_y = self.intro_snake.segments[index]
-                prev_x, prev_y = self.intro_snake.segments[index - 1]
-                dx, dy = cur_x - prev_x, cur_y - prev_y
-                angle = self.intro_snake._direction_to_angle((dx, dy))
-                oriented = pygame.transform.rotate(tail_image, angle) if angle else tail_image
-                rect = oriented.get_rect(center=center)
-                self.screen.blit(oriented, rect)
-            else:
-                angle = self.intro_snake._body_angle(index)
-                segment_image = throat_image if index == 1 else body_image
-                oriented = pygame.transform.rotate(segment_image, angle) if angle else segment_image
-                rect = oriented.get_rect(center=center)
-                self.screen.blit(oriented, rect)
+        if self.intro_phase == "veil" and self.intro_veil_total_steps > 0:
+            progress = self.intro_veil_steps / max(1, self.intro_veil_total_steps)
+            if progress <= 1.0 / 4.0:
+                return 0.0
+            return min(1.0, (progress - 1.0 / 4.0) / (3.0 / 4.0))
+        return 1.0
 
     def _build_tetris_arena(self) -> set[tuple[int, int]]:
         """Create a full-arena Tetris-shaped playfield."""
@@ -1652,6 +1700,9 @@ class Game:
             self.screen.blit(self.start_bg, (0, 0))
         else:
             self.screen.blit(self.menu_background, (0, 0))
+
+        if self.intro_done and self.intro_snake:
+            self.intro_snake.draw(self.screen, 0, alpha=0.0)
 
         base_y = int(SCREEN_HEIGHT * 0.66) + 52
         line_gap = 40
