@@ -117,7 +117,41 @@ class Game:
         self.first_sacrifice_level = self.last_tetris_level + 1
         self.sacrifice_level_count = 5
         self.last_sacrifice_level = self.first_sacrifice_level + self.sacrifice_level_count - 1
+        self.escape_level = self.last_sacrifice_level + 1
         self.breakable_wall_positions: set[tuple[int, int]] = set()
+        self.escape_wall_open = False
+        self.side_scroller_active = False
+        self.side_scroller_left_lock = 2
+        self.starfield: list[dict] = []
+        self.star_count = 90
+        self.star_speed_range = (40.0, 140.0)
+        self.side_scroller_food_eaten = 0
+        self.side_scroller_food_needed = 5
+        self.side_scroller_trigger_x = GRID_WIDTH - 8
+        self.space_fade = 0.0
+        self.space_fade_time_ms = 0.0
+        self.space_fade_duration_ms = 5000.0
+        self.space_fade_active = False
+        self.player_shots: list[dict] = []
+        self.player_shot_speed = 16.0
+        self.player_shot_radius = max(2, int(TILE_SIZE * 0.25))
+        self.player_shot_limit = 3
+        self.boss_active = False
+        self.boss_hp = 0
+        self.boss_pos = (0.0, 0.0)
+        self.boss_dir = 1
+        self.boss_speed = 3.8
+        self.boss_approach_speed = 6.0
+        self.boss_width = 3
+        self.boss_height = 4
+        self.boss_target_x = GRID_WIDTH - self.boss_width - 2
+        self.boss_fire_interval_ms = 1200
+        self.boss_fire_timer_ms = 0.0
+        self.boss_bullets: list[dict] = []
+        self.boss_bullet_speed = 9.5
+        self.boss_bullet_radius = max(2, int(TILE_SIZE * 0.25))
+        self.boss_state = "hidden"
+        self.boss_sprite = self._build_boss_sprite()
         self.story_active = False
         self.story_text = ""
         self.story_next_action = ""
@@ -131,6 +165,7 @@ class Game:
         self.story_intro_text = "Placeholder intro"
         self.story_mid_text = "Placeholder level 5-6"
         self.story_end_text = "Placeholder sacrifice intro"
+        self.story_final_text = "Placeholder finale"
         self.intro_active = True
         self.intro_done = False
         self.intro_phase = "veil"
@@ -174,6 +209,19 @@ class Game:
         self.story_active = False
         self.input_locked = False
         self.queued_direction = None
+        self.side_scroller_active = False
+        self.escape_wall_open = False
+        self.starfield = []
+        self.side_scroller_food_eaten = 0
+        self.space_fade = 0.0
+        self.space_fade_time_ms = 0.0
+        self.space_fade_active = False
+        self.player_shots.clear()
+        self.boss_bullets.clear()
+        self.boss_active = False
+        self.boss_hp = 0
+        self.boss_state = "hidden"
+        self.boss_fire_timer_ms = 0.0
 
     def _place_snake_for_level(self):
         if not self.snake:
@@ -251,6 +299,17 @@ class Game:
         self.game_paused = False
         self.sacrifice_shot_active = False
         self.sacrifice_explosions.clear()
+        self.side_scroller_active = False
+        self.starfield = []
+        self.side_scroller_food_eaten = 0
+        self.space_fade = 0.0
+        self.space_fade_time_ms = 0.0
+        self.space_fade_active = False
+        self.player_shots.clear()
+        self.boss_bullets.clear()
+        self.boss_active = False
+        self.boss_hp = 0
+        self.boss_state = "hidden"
         self.start_music()
         self.start_story(self.story_intro_text, "begin_loading")
 
@@ -272,6 +331,12 @@ class Game:
         self.queued_direction = None
         self.sacrifice_shot_active = False
         self.sacrifice_explosions.clear()
+        self.side_scroller_active = False
+        self.starfield = []
+        self.player_shots.clear()
+        self.boss_bullets.clear()
+        self.boss_active = False
+        self.boss_hp = 0
         self.points = self.level_start_points
         self.elapsed_time_ms = self.level_start_time_ms
         self.start_music()
@@ -308,6 +373,11 @@ class Game:
         self.sacrifice_left_cells = None
         self.sacrifice_right_cells = None
         self.sacrifice_wall_open = False
+        self.escape_wall_open = False
+
+        if self._in_escape_level():
+            self._build_escape_arena()
+            return
 
         if self._in_sacrifice_levels():
             self._build_sacrifice_arena()
@@ -367,6 +437,10 @@ class Game:
 
     def place_gate_elements(self):
         """Place the button and key with increasing separation per level."""
+        if self._in_escape_level():
+            self.button_pos = None
+            self.key_pos = None
+            return
         if self._in_sacrifice_levels():
             self._place_sacrifice_gate()
             return
@@ -431,6 +505,8 @@ class Game:
                     continue
                 if candidate == self.button_pos or candidate == self.key_pos:
                     continue
+                if self._position_in_boss_area(candidate):
+                    continue
                 self.food.position = candidate
                 return
             return
@@ -445,6 +521,8 @@ class Game:
                     continue
                 if candidate in self.wall_positions:
                     continue
+                if self._position_in_boss_area(candidate):
+                    continue
                 self.food.position = candidate
                 return
             return
@@ -458,6 +536,8 @@ class Game:
             if candidate == self.button_pos or candidate == self.key_pos:
                 continue
             if candidate in self.wall_positions:
+                continue
+            if self._position_in_boss_area(candidate):
                 continue
             self.food.position = candidate
             break
@@ -604,9 +684,13 @@ class Game:
                                 self.level = self.first_sacrifice_level
                                 self.level_clear = False
                                 self.start_story(self.story_end_text, "begin_loading")
-                            elif self.level >= self.last_sacrifice_level:
+                            elif self.level == self.last_sacrifice_level:
+                                self.level += 1
                                 self.level_clear = False
-                                self.exit_to_menu()
+                                self.begin_loading()
+                            elif self.level == self.escape_level:
+                                self.level_clear = False
+                                self.start_story(self.story_final_text, "end_to_menu")
                             else:
                                 self.level += 1
                                 self.level_clear = False
@@ -627,7 +711,7 @@ class Game:
                             self.game_paused = True
                             self.last_frame_ms = pygame.time.get_ticks()
                             continue
-                        if event.key == pygame.K_s and self._in_sacrifice_levels():
+                        if event.key == pygame.K_s and self._can_shoot():
                             self.shoot_sacrifice()
                             continue
                         if event.key == pygame.K_n:
@@ -673,6 +757,10 @@ class Game:
             self.update_loading()
             return
 
+        if self.side_scroller_active:
+            self.update_side_scroller(dt_ms)
+            return
+
         move_interval_ms = 1000 / max(1e-6, FPS * self.speed_multiplier)
         self.move_accumulator_ms += dt_ms
         self._update_sacrifice_shot(dt_ms)
@@ -690,6 +778,7 @@ class Game:
             self.check_collisions()
             self.check_food_eaten()
             self.check_key_reached()
+            self._check_escape_transition()
             updates += 1
             if updates >= max_updates:
                 self.move_accumulator_ms = 0.0
@@ -738,8 +827,315 @@ class Game:
                 self.intro_move_accumulator_ms = 0.0
                 break
 
+    def update_side_scroller(self, dt_ms: float):
+        if not self.snake:
+            return
+
+        self._update_starfield(dt_ms)
+        self._update_space_fade(dt_ms)
+        self._update_boss(dt_ms)
+        self._update_player_shots(dt_ms)
+        if not self.side_scroller_active:
+            return
+        self._update_boss_bullets(dt_ms)
+
+        move_interval_ms = 1000 / max(1e-6, FPS * self.speed_multiplier)
+        self.move_accumulator_ms += dt_ms
+        updates = 0
+        max_updates = 5
+        while self.move_accumulator_ms >= move_interval_ms and not self.game_over:
+            self.move_accumulator_ms -= move_interval_ms
+            self.elapsed_time_ms += move_interval_ms
+            self.input_locked = False
+            if self.queued_direction:
+                if self._direction_valid(self.queued_direction, self.snake.direction):
+                    self.snake.set_direction(self.queued_direction)
+                self.queued_direction = None
+
+            head_x, _ = self.snake.head
+            if self.snake.pending_direction == (-1, 0) and head_x <= self.side_scroller_left_lock:
+                updates += 1
+                if updates >= max_updates:
+                    self.move_accumulator_ms = 0.0
+                continue
+
+            self.snake.update()
+            self._apply_side_scroller_bounds()
+            self.check_food_eaten()
+            updates += 1
+            if updates >= max_updates:
+                self.move_accumulator_ms = 0.0
+                break
+
+        self._check_side_scroller_collisions()
+
+    def _apply_side_scroller_bounds(self):
+        if not self.snake:
+            return
+        head_x, head_y = self.snake.head
+        original = (head_x, head_y)
+        if head_y < 0:
+            head_y = GRID_HEIGHT - 1
+        elif head_y >= GRID_HEIGHT:
+            head_y = 0
+        if head_x < self.side_scroller_left_lock:
+            head_x = self.side_scroller_left_lock
+        if head_x >= GRID_WIDTH:
+            head_x = GRID_WIDTH - 1
+        if (head_x, head_y) != original:
+            self.snake.segments[0] = (head_x, head_y)
+            self.snake.reset_interpolation()
+
+    def _check_escape_transition(self):
+        if not self._in_escape_level() or self.side_scroller_active:
+            return
+        if not self.snake:
+            return
+        head_x, head_y = self.snake.head
+        if head_x == GRID_WIDTH - 1 and (head_x, head_y) not in self.wall_positions:
+            self.enter_side_scroller(head_y)
+
+    def enter_side_scroller(self, entry_row: int | None = None):
+        if not self.snake:
+            return
+        self.side_scroller_active = True
+        self.wall_positions.clear()
+        self.breakable_wall_positions.clear()
+        self.button_pos = None
+        self.key_pos = None
+        self.playable_cells = None
+        self.sacrifice_shot_active = False
+        self.sacrifice_explosions.clear()
+        self.player_shots.clear()
+        self.boss_bullets.clear()
+        self.side_scroller_food_eaten = 0
+        self.space_fade = 0.0
+        self.space_fade_time_ms = 0.0
+        self.space_fade_active = False
+        self._reset_starfield()
+        self._init_boss()
+
+        length = max(1, len(self.snake.segments))
+        y = entry_row if entry_row is not None else self.snake.head[1]
+        y = max(0, min(GRID_HEIGHT - 1, y))
+        head_x = min(GRID_WIDTH - 2, self.side_scroller_left_lock + max(0, length - 1))
+        positions = [(head_x - i, y) for i in range(length)]
+        self.snake.segments = positions
+        self.snake.direction = (1, 0)
+        self.snake.pending_direction = (1, 0)
+        self.snake.reset_interpolation()
+        self.spawn_food()
+        self.last_frame_ms = pygame.time.get_ticks()
+        self.move_accumulator_ms = 0.0
+        self.input_locked = False
+        self.queued_direction = None
+
+    def _reset_starfield(self):
+        self.starfield = []
+        for _ in range(self.star_count):
+            self.starfield.append(
+                {
+                    "x": random.uniform(0, SCREEN_WIDTH),
+                    "y": random.uniform(HUD_HEIGHT, SCREEN_HEIGHT),
+                    "speed": random.uniform(*self.star_speed_range),
+                    "size": random.randint(1, 3),
+                    "glow": random.randint(160, 255),
+                }
+            )
+
+    def _update_starfield(self, dt_ms: float):
+        if not self.starfield:
+            return
+        dt_sec = max(0.0, dt_ms / 1000.0)
+        for star in self.starfield:
+            star["x"] -= star["speed"] * dt_sec
+            if star["x"] < -4:
+                star["x"] = SCREEN_WIDTH + random.uniform(0, SCREEN_WIDTH * 0.2)
+                star["y"] = random.uniform(HUD_HEIGHT, SCREEN_HEIGHT)
+                star["speed"] = random.uniform(*self.star_speed_range)
+                star["size"] = random.randint(1, 3)
+                star["glow"] = random.randint(160, 255)
+            elif random.random() < 0.02:
+                star["glow"] = random.randint(160, 255)
+
+    def _update_space_fade(self, dt_ms: float):
+        if not self.snake:
+            return
+        if self.boss_state == "hidden" and not self.space_fade_active:
+            head_x, _ = self.snake.head
+            if (
+                self.side_scroller_food_eaten >= self.side_scroller_food_needed
+                and head_x >= self.side_scroller_trigger_x
+            ):
+                self.space_fade_active = True
+
+        if not self.space_fade_active:
+            return
+
+        self.space_fade_time_ms += dt_ms
+        self.space_fade = min(1.0, self.space_fade_time_ms / max(1.0, self.space_fade_duration_ms))
+        if self.space_fade >= 1.0 and self.boss_state == "hidden":
+            self._start_boss_approach()
+
+    def _init_boss(self):
+        boss_y = max(1, (GRID_HEIGHT - self.boss_height) // 2)
+        self.boss_pos = (GRID_WIDTH + 2, float(boss_y))
+        self.boss_dir = 1
+        self.boss_fire_timer_ms = 0.0
+        self.boss_target_x = GRID_WIDTH - self.boss_width - 2
+        self.boss_hp = 10
+        self.boss_active = False
+        self.boss_state = "hidden"
+
+    def _start_boss_approach(self):
+        boss_y = max(1, (GRID_HEIGHT - self.boss_height) // 2)
+        self.boss_pos = (GRID_WIDTH + 2, float(boss_y))
+        self.boss_dir = 1
+        self.boss_fire_timer_ms = 0.0
+        self.boss_hp = 10
+        self.boss_active = True
+        self.boss_state = "approach"
+
+    def _update_boss(self, dt_ms: float):
+        if self.boss_state == "hidden":
+            return
+        dt_sec = max(0.0, dt_ms / 1000.0)
+        boss_x, boss_y = self.boss_pos
+        if self.boss_state == "approach":
+            boss_x -= self.boss_approach_speed * dt_sec
+            if boss_x <= self.boss_target_x:
+                boss_x = self.boss_target_x
+                self.boss_state = "active"
+            self.boss_pos = (boss_x, boss_y)
+            return
+
+        if self.boss_state != "active":
+            return
+
+        boss_y += self.boss_dir * self.boss_speed * dt_sec
+        min_y = 1
+        max_y = GRID_HEIGHT - self.boss_height - 1
+        if boss_y <= min_y:
+            boss_y = min_y
+            self.boss_dir = 1
+        elif boss_y >= max_y:
+            boss_y = max_y
+            self.boss_dir = -1
+        self.boss_pos = (boss_x, boss_y)
+
+        self.boss_fire_timer_ms += dt_ms
+        if self.boss_fire_timer_ms >= self.boss_fire_interval_ms:
+            self.boss_fire_timer_ms = 0.0
+            self._fire_boss_bullet()
+
+    def _fire_boss_bullet(self):
+        if not self.boss_active:
+            return
+        boss_x, boss_y = self.boss_pos
+        center_x = boss_x + self.boss_width * 0.5
+        center_y = boss_y + self.boss_height * 0.5
+        self.boss_bullets.append(
+            {
+                "x": center_x,
+                "y": center_y,
+                "vx": -1.0,
+                "vy": 0.0,
+            }
+        )
+
+    def _update_player_shots(self, dt_ms: float):
+        if not self.player_shots:
+            return
+        dt_sec = max(0.0, dt_ms / 1000.0)
+        remaining: list[dict] = []
+        for shot in self.player_shots:
+            shot["x"] += shot["vx"] * self.player_shot_speed * dt_sec
+            shot["y"] += shot["vy"] * self.player_shot_speed * dt_sec
+            if shot["x"] > GRID_WIDTH + 1 or shot["x"] < -2:
+                continue
+            if shot["y"] > GRID_HEIGHT + 1 or shot["y"] < -2:
+                continue
+            if self.boss_active and self._shot_hits_boss(shot["x"], shot["y"]):
+                self.boss_hp -= 1
+                if self.boss_hp <= 0:
+                    self._finish_boss()
+                    return
+                continue
+            remaining.append(shot)
+        self.player_shots = remaining
+
+    def _update_boss_bullets(self, dt_ms: float):
+        if self.boss_state != "active":
+            return
+        if not self.boss_bullets:
+            return
+        dt_sec = max(0.0, dt_ms / 1000.0)
+        remaining: list[dict] = []
+        for bullet in self.boss_bullets:
+            bullet["x"] += bullet["vx"] * self.boss_bullet_speed * dt_sec
+            bullet["y"] += bullet["vy"] * self.boss_bullet_speed * dt_sec
+            if bullet["x"] < -2 or bullet["x"] > GRID_WIDTH + 2:
+                continue
+            if bullet["y"] < -2 or bullet["y"] > GRID_HEIGHT + 2:
+                continue
+            remaining.append(bullet)
+        self.boss_bullets = remaining
+
+    def _shot_hits_boss(self, shot_x: float, shot_y: float) -> bool:
+        bx, by, bw, bh = self._boss_rect_cells()
+        return bx <= shot_x < bx + bw and by <= shot_y < by + bh
+
+    def _boss_rect_cells(self) -> tuple[int, int, int, int]:
+        boss_x, boss_y = self.boss_pos
+        return int(boss_x), int(boss_y), self.boss_width, self.boss_height
+
+    def _check_side_scroller_collisions(self):
+        if not self.snake:
+            return
+        head_x, head_y = self.snake.head
+        if self.boss_active:
+            bx, by, bw, bh = self._boss_rect_cells()
+            if bx <= head_x < bx + bw and by <= head_y < by + bh:
+                self.play_sound("death")
+                self.game_over = True
+                self.game_started = False
+                self.game_paused = False
+                self.stop_music()
+                return
+
+        if not self.boss_bullets:
+            return
+        for bullet in self.boss_bullets:
+            for seg in self.snake.segments:
+                if abs((seg[0] + 0.5) - bullet["x"]) <= 0.4 and abs((seg[1] + 0.5) - bullet["y"]) <= 0.4:
+                    self.play_sound("death")
+                    self.game_over = True
+                    self.game_started = False
+                    self.game_paused = False
+                    self.stop_music()
+                    return
+
+    def _finish_boss(self):
+        self.boss_active = False
+        self.boss_state = "defeated"
+        self.side_scroller_active = False
+        self.player_shots.clear()
+        self.boss_bullets.clear()
+        self.start_story(self.story_final_text, "end_to_menu")
+
+    def _position_in_boss_area(self, pos: tuple[int, int]) -> bool:
+        if not self.boss_active:
+            return False
+        x, y = pos
+        bx, by, bw, bh = self._boss_rect_cells()
+        return bx <= x < bx + bw and by <= y < by + bh
+
     def check_collisions(self):
         head_x, head_y = self.snake.head
+
+        if self.side_scroller_active:
+            self._check_side_scroller_collisions()
+            return
 
         if self._in_sacrifice_levels():
             if not self.sacrifice_playable_cells or (head_x, head_y) not in self.sacrifice_playable_cells:
@@ -775,6 +1171,8 @@ class Game:
             self.points += 1
             self.level_food_eaten += 1
             self.sacrifice_ammo += 1
+            if self.side_scroller_active:
+                self.side_scroller_food_eaten += 1
             self.spawn_food()
 
     def check_key_reached(self):
@@ -806,9 +1204,13 @@ class Game:
                 self.level = self.first_sacrifice_level
                 self.level_clear = False
                 self.start_story(self.story_end_text, "begin_loading")
-            elif self.level >= self.last_sacrifice_level:
+            elif self.level == self.last_sacrifice_level:
+                self.level += 1
                 self.level_clear = False
-                self.exit_to_menu()
+                self.begin_loading()
+            elif self.level == self.escape_level:
+                self.level_clear = False
+                self.start_story(self.story_final_text, "end_to_menu")
             else:
                 self.level += 1
                 self.level_clear = False
@@ -841,6 +1243,8 @@ class Game:
             self.draw_loading_screen()
         elif self.game_paused:
             self.draw_pause_screen()
+        elif self.side_scroller_active:
+            self.draw_side_scroller()
         else:
             self.draw_playfield()
             pygame.display.flip()
@@ -866,8 +1270,49 @@ class Game:
         self.draw_hud_band()
         self.draw_hud()
 
+    def draw_side_scroller(self, flip: bool = True):
+        self.screen.fill((0, 0, 0))
+        self.screen.blit(self.background, (0, HUD_HEIGHT))
+        if self.space_fade > 0.0:
+            overlay = pygame.Surface((SCREEN_WIDTH, PLAYFIELD_HEIGHT), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, int(255 * min(1.0, self.space_fade))))
+            self.screen.blit(overlay, (0, HUD_HEIGHT))
+        self._draw_starfield()
+
+        if self.food:
+            self.food.draw(self.screen, HUD_HEIGHT)
+        self._draw_boss()
+        move_interval_ms = 1000 / max(1e-6, FPS * self.speed_multiplier)
+        alpha = 0.0
+        if move_interval_ms > 0:
+            alpha = min(1.0, max(0.0, self.move_accumulator_ms / move_interval_ms))
+        if self.snake:
+            self.snake.draw(self.screen, HUD_HEIGHT, alpha=alpha)
+        self._draw_player_shots()
+        self._draw_boss_bullets()
+
+        self.draw_hud_band()
+        self.draw_hud()
+        if flip:
+            pygame.display.flip()
+
+    def _build_boss_sprite(self) -> pygame.Surface | None:
+        size = (self.boss_width * TILE_SIZE, self.boss_height * TILE_SIZE)
+        image = load_scaled_image("head.png", size)
+        if image is None:
+            return None
+        mask = pygame.Surface(size, pygame.SRCALPHA)
+        radius = max(6, int(min(size) * 0.22))
+        pygame.draw.rect(mask, (255, 255, 255, 255), mask.get_rect(), border_radius=radius)
+        rounded = image.copy()
+        rounded.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+        return rounded
+
     def draw_pause_screen(self):
-        self.draw_playfield()
+        if self.side_scroller_active:
+            self.draw_side_scroller(flip=False)
+        else:
+            self.draw_playfield()
 
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 170))
@@ -884,6 +1329,69 @@ class Game:
         self.screen.blit(prompt_text, prompt_rect)
         self.screen.blit(esc_text, esc_rect)
         pygame.display.flip()
+
+    def _draw_starfield(self):
+        if not self.starfield:
+            return
+        for star in self.starfield:
+            glow = int(star["glow"])
+            color = (glow, glow, min(255, glow + 40))
+            pygame.draw.circle(
+                self.screen,
+                color,
+                (int(star["x"]), int(star["y"])),
+                int(star["size"]),
+            )
+
+    def _draw_player_shots(self):
+        if not self.player_shots:
+            return
+        for shot in self.player_shots:
+            center = (
+                int(shot["x"] * TILE_SIZE),
+                int(shot["y"] * TILE_SIZE + HUD_HEIGHT),
+            )
+            pygame.draw.circle(self.screen, COLOR_SNAKE, center, self.player_shot_radius)
+
+    def _draw_boss_bullets(self):
+        if not self.boss_bullets:
+            return
+        for bullet in self.boss_bullets:
+            center = (
+                int(bullet["x"] * TILE_SIZE),
+                int(bullet["y"] * TILE_SIZE + HUD_HEIGHT),
+            )
+            pygame.draw.circle(self.screen, (240, 80, 80), center, self.boss_bullet_radius)
+
+    def _draw_boss(self):
+        if not self.boss_active:
+            return
+        rect = self._boss_rect_pixels()
+        if self.boss_sprite:
+            self.screen.blit(self.boss_sprite, rect.topleft)
+            glow = rect.inflate(10, 10)
+            pygame.draw.rect(self.screen, (120, 40, 70), glow, width=2, border_radius=12)
+        else:
+            pygame.draw.rect(self.screen, (220, 70, 90), rect, border_radius=8)
+            glow = rect.inflate(8, 8)
+            pygame.draw.rect(self.screen, (140, 40, 60), glow, width=2, border_radius=10)
+
+        if self.boss_hp > 0:
+            hp_ratio = max(0.0, min(1.0, self.boss_hp / 10))
+            bar_height = max(4, TILE_SIZE // 5)
+            bar_rect = pygame.Rect(rect.left, rect.top - bar_height - 4, rect.width, bar_height)
+            pygame.draw.rect(self.screen, (40, 20, 30), bar_rect, border_radius=4)
+            fill_rect = pygame.Rect(bar_rect.left, bar_rect.top, int(bar_rect.width * hp_ratio), bar_rect.height)
+            pygame.draw.rect(self.screen, (255, 120, 120), fill_rect, border_radius=4)
+
+    def _boss_rect_pixels(self) -> pygame.Rect:
+        boss_x, boss_y = self.boss_pos
+        return pygame.Rect(
+            int(boss_x * TILE_SIZE),
+            int(boss_y * TILE_SIZE + HUD_HEIGHT),
+            self.boss_width * TILE_SIZE,
+            self.boss_height * TILE_SIZE,
+        )
 
     def draw_story_screen(self):
         self.screen.fill((0, 0, 0))
@@ -1012,7 +1520,7 @@ class Game:
         return images
 
     def draw_sacrifice_effects(self):
-        if not self._in_sacrifice_levels():
+        if not self._in_sacrifice_levels() and not self._in_escape_level():
             return
 
         if self.sacrifice_shot_active:
@@ -1130,6 +1638,9 @@ class Game:
         if self._direction_valid(new_dir, self.snake.pending_direction):
             self.queued_direction = new_dir
 
+    def _can_shoot(self) -> bool:
+        return self._in_sacrifice_levels() or self._in_escape_level() or self.side_scroller_active
+
     def required_food_for_level(self) -> int:
         if self.level == 1:
             return 2
@@ -1142,6 +1653,20 @@ class Game:
 
     def _in_sacrifice_levels(self) -> bool:
         return self.first_sacrifice_level <= self.level <= self.last_sacrifice_level
+
+    def _in_escape_level(self) -> bool:
+        return self.level == self.escape_level
+
+    def _build_escape_arena(self):
+        self.playable_cells = None
+        right_x = GRID_WIDTH - 1
+        for x in range(GRID_WIDTH):
+            self.wall_positions.add((x, 0))
+            self.wall_positions.add((x, GRID_HEIGHT - 1))
+        for y in range(GRID_HEIGHT):
+            self.wall_positions.add((0, y))
+            self.wall_positions.add((right_x, y))
+            self.breakable_wall_positions.add((right_x, y))
 
     def _build_sacrifice_arena(self):
         level_index = max(0, self.level - self.first_sacrifice_level)
@@ -1235,15 +1760,21 @@ class Game:
         self.snake.reset_interpolation()
 
     def shoot_sacrifice(self):
-        if not self._in_sacrifice_levels():
+        if not self._can_shoot():
             return
         if self.sacrifice_ammo <= 0:
             return
         if not self.snake:
             return
-        if self.sacrifice_shot_active:
-            return
         if len(self.snake.segments) <= 1:
+            return
+
+        if self.side_scroller_active:
+            if self._fire_player_shot():
+                self._consume_shot_ammo()
+            return
+
+        if self.sacrifice_shot_active:
             return
 
         dx, dy = self.snake.pending_direction
@@ -1265,12 +1796,32 @@ class Game:
             return
 
         self._start_sacrifice_shot(hit_pos, (dx, dy))
+        self._consume_shot_ammo()
 
+    def _consume_shot_ammo(self):
+        if self.sacrifice_ammo <= 0 or not self.snake:
+            return
         self.sacrifice_ammo -= 1
         if self.snake.grow_pending > 0:
             self.snake.grow_pending -= 1
         elif len(self.snake.segments) > 1:
             self.snake.segments.pop()
+
+    def _fire_player_shot(self) -> bool:
+        if not self.snake:
+            return False
+        if len(self.player_shots) >= self.player_shot_limit:
+            return False
+        head_x, head_y = self.snake.head
+        self.player_shots.append(
+            {
+                "x": head_x + 0.7,
+                "y": head_y + 0.5,
+                "vx": 1.0,
+                "vy": 0.0,
+            }
+        )
+        return True
 
     def _start_sacrifice_shot(self, hit_pos: tuple[int, int], direction: tuple[int, int]):
         if not self.snake:
@@ -1337,7 +1888,10 @@ class Game:
             self.wall_positions.discard(hit_pos)
             if self.sacrifice_playable_cells is not None:
                 self.sacrifice_playable_cells.add(hit_pos)
-            self.sacrifice_wall_open = True
+            if self._in_sacrifice_levels():
+                self.sacrifice_wall_open = True
+            if self._in_escape_level():
+                self.escape_wall_open = True
 
     def _build_story_path(self) -> list[tuple[int, int]]:
         margin = 2
@@ -1821,6 +2375,17 @@ class Game:
         self.level_clear = False
         self.loading_active = False
         self.story_active = False
+        self.side_scroller_active = False
+        self.starfield = []
+        self.side_scroller_food_eaten = 0
+        self.space_fade = 0.0
+        self.space_fade_time_ms = 0.0
+        self.space_fade_active = False
+        self.player_shots.clear()
+        self.boss_bullets.clear()
+        self.boss_active = False
+        self.boss_hp = 0
+        self.boss_state = "hidden"
         self.story_text = ""
         self.story_next_action = ""
         self.menu_page = "main"

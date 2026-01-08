@@ -363,6 +363,8 @@ class Snake:
         for index in range(1, len(positions)):
             x1, y1 = positions[index - 1]
             x2, y2 = positions[index]
+            if abs(x1 - x2) > 1.5 or abs(y1 - y2) > 1.5:
+                continue
             cx1 = x1 * TILE_SIZE + half
             cy1 = y1 * TILE_SIZE + offset_y + half
             cx2 = x2 * TILE_SIZE + half
