@@ -606,6 +606,10 @@ class Game:
                             self.running = False
                     continue
 
+                if event.key == pygame.K_q:
+                    self.jump_to_final_boss()
+                    continue
+
                 if not self.game_started and self.menu_page == "main" and self.intro_active:
                     self.intro_active = False
                     self.intro_done = True
@@ -1089,12 +1093,19 @@ class Game:
         boss_x, boss_y = self.boss_pos
         return int(boss_x), int(boss_y), self.boss_width, self.boss_height
 
+    def _boss_contact_hitbox_cells(self) -> tuple[float, float, float, float]:
+        boss_x, boss_y = self.boss_pos
+        inset = 0.2
+        width = max(0.1, self.boss_width - inset * 2)
+        height = max(0.1, self.boss_height - inset * 2)
+        return boss_x + inset, boss_y + inset, width, height
+
     def _check_side_scroller_collisions(self):
         if not self.snake:
             return
         head_x, head_y = self.snake.head
         if self.boss_active:
-            bx, by, bw, bh = self._boss_rect_cells()
+            bx, by, bw, bh = self._boss_contact_hitbox_cells()
             if bx <= head_x < bx + bw and by <= head_y < by + bh:
                 self.play_sound("death")
                 self.game_over = True
@@ -1225,6 +1236,46 @@ class Game:
         if self.game_started:
             self.complete_level()
 
+    def jump_to_final_boss(self):
+        """Debug helper: jump straight to the final boss fight."""
+        self.game_started = True
+        self.game_over = False
+        self.level_clear = False
+        self.loading_active = False
+        self.story_active = False
+        self.story_text = ""
+        self.story_next_action = ""
+        self.game_paused = False
+        self.menu_page = "main"
+        self.intro_active = False
+        self.intro_done = True
+        self.input_locked = False
+        self.queued_direction = None
+        self.sacrifice_shot_active = False
+        self.sacrifice_explosions.clear()
+        self.side_scroller_active = False
+        self.player_shots.clear()
+        self.boss_bullets.clear()
+        self.boss_active = False
+        self.boss_hp = 0
+        self.boss_state = "hidden"
+        self.space_fade = 0.0
+        self.space_fade_time_ms = 0.0
+        self.space_fade_active = False
+        self.starfield = []
+
+        self.start_music()
+        self.level = self.escape_level
+        self.level_start_points = self.points
+        self.level_start_time_ms = self.elapsed_time_ms
+        self.layout_ready = False
+        self.start_level()
+        self.enter_side_scroller()
+        self.sacrifice_ammo = max(self.sacrifice_ammo, 10)
+        self.space_fade = 1.0
+        self._start_boss_approach()
+        self.spawn_food()
+
     def draw(self):
         if self.game_over:
             self.draw_game_over()
@@ -1306,7 +1357,7 @@ class Game:
         pygame.draw.rect(mask, (255, 255, 255, 255), mask.get_rect(), border_radius=radius)
         rounded = image.copy()
         rounded.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
-        return rounded
+        return pygame.transform.flip(rounded, True, False)
 
     def draw_pause_screen(self):
         if self.side_scroller_active:
@@ -1369,12 +1420,8 @@ class Game:
         rect = self._boss_rect_pixels()
         if self.boss_sprite:
             self.screen.blit(self.boss_sprite, rect.topleft)
-            glow = rect.inflate(10, 10)
-            pygame.draw.rect(self.screen, (120, 40, 70), glow, width=2, border_radius=12)
         else:
             pygame.draw.rect(self.screen, (220, 70, 90), rect, border_radius=8)
-            glow = rect.inflate(8, 8)
-            pygame.draw.rect(self.screen, (140, 40, 60), glow, width=2, border_radius=10)
 
         if self.boss_hp > 0:
             hp_ratio = max(0.0, min(1.0, self.boss_hp / 10))
@@ -1813,12 +1860,18 @@ class Game:
         if len(self.player_shots) >= self.player_shot_limit:
             return False
         head_x, head_y = self.snake.head
+        dx, dy = self.snake.pending_direction
+        if (dx, dy) == (0, 0):
+            dx, dy = self.snake.direction
+        if (dx, dy) == (0, 0):
+            return False
+        offset = 0.55
         self.player_shots.append(
             {
-                "x": head_x + 0.7,
-                "y": head_y + 0.5,
-                "vx": 1.0,
-                "vy": 0.0,
+                "x": head_x + 0.5 + dx * offset,
+                "y": head_y + 0.5 + dy * offset,
+                "vx": float(dx),
+                "vy": float(dy),
             }
         )
         return True
