@@ -121,7 +121,7 @@ class Game:
         self.breakable_wall_positions: set[tuple[int, int]] = set()
         self.escape_wall_open = False
         self.side_scroller_active = False
-        self.side_scroller_left_lock = 2
+        self.side_scroller_left_lock = 0
         self.starfield: list[dict] = []
         self.star_count = 90
         self.star_speed_range = (40.0, 140.0)
@@ -2054,7 +2054,7 @@ class Game:
             max_offset = max(max_offset, offset)
             max_length = max(max_length, length)
 
-        extra_snakes = 40
+        extra_snakes = 160
         if rows > 2:
             for _ in range(extra_snakes):
                 row = random.randint(1, rows - 2)
