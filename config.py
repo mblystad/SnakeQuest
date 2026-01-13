@@ -84,7 +84,7 @@ def load_custom_font(filename: str, size: int) -> pygame.font.Font:
     return load_pixel_font(size)
 
 
-def load_scaled_image(filename: str, size: tuple[int, int]):
+def load_scaled_image(filename: str, size: tuple[int, int], *, smooth: bool = True):
     """Load a PNG from the assets folder and scale it to the given size.
 
     Returns ``None`` when the file is missing or invalid so callers can
@@ -107,4 +107,6 @@ def load_scaled_image(filename: str, size: tuple[int, int]):
     if image is None:
         return None
 
-    return pygame.transform.smoothscale(image, size)
+    if smooth:
+        return pygame.transform.smoothscale(image, size)
+    return pygame.transform.scale(image, size)

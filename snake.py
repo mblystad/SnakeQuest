@@ -78,7 +78,7 @@ class Snake:
         """Load a body PNG or build a simple colored block fallback."""
 
         for filename in ("segment.png", "snake_body.png"):
-            image = load_scaled_image(filename, (TILE_SIZE, TILE_SIZE))
+            image = load_scaled_image(filename, (TILE_SIZE, TILE_SIZE), smooth=False)
             if image is not None:
                 return image
 
@@ -109,7 +109,7 @@ class Snake:
     def _load_corner_image(self) -> pygame.Surface | None:
         """Load a corner PNG; return None when missing for graceful fallback."""
 
-        image = load_scaled_image("corner.png", (TILE_SIZE, TILE_SIZE))
+        image = load_scaled_image("corner.png", (TILE_SIZE, TILE_SIZE), smooth=False)
         if image is not None:
             return image
 
