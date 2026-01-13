@@ -2040,7 +2040,7 @@ class Game:
         snakes: list[Snake] = []
         max_offset = 0
         max_length = 0
-        for row in range(1, rows - 1, 2):
+        for row in range(rows):
             length = 6 + (row % 5)
             offset = (row * 3) % 10
             start_x = -length - offset
@@ -2054,10 +2054,10 @@ class Game:
             max_offset = max(max_offset, offset)
             max_length = max(max_length, length)
 
-        extra_snakes = 160
+        extra_snakes = max(160, rows * 8)
         if rows > 2:
             for _ in range(extra_snakes):
-                row = random.randint(1, rows - 2)
+                row = random.randint(0, rows - 1)
                 length = random.randint(6, 10)
                 offset = random.randint(0, 10)
                 start_x = -length - offset
@@ -2071,7 +2071,14 @@ class Game:
                 max_offset = max(max_offset, offset)
                 max_length = max(max_length, length)
 
-        self.intro_veil_total_steps = cols + max_offset + max_length + 2
+        max_required_steps = 0
+        for snake in snakes:
+            length = len(snake.segments)
+            start_x = snake.segments[0][0]
+            steps = cols - start_x + (length - 1)
+            max_required_steps = max(max_required_steps, steps)
+
+        self.intro_veil_total_steps = max_required_steps + 2
         return snakes
 
     def _advance_intro_veil(self):
