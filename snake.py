@@ -25,6 +25,7 @@ class Snake:
         self.body_image = self._load_body_image()
         self.throat_image = self._load_throat_image()
         self.tail_image = self._load_tail_image()
+        self.corner_image = self._load_corner_image()
         self._rotation_cache = self._build_rotation_cache()
         self.connector_thickness = max(4, int(TILE_SIZE * 0.6))
         self.connector_radius = max(2, int(self.connector_thickness * 0.5))
@@ -104,6 +105,15 @@ class Snake:
         placeholder = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
         placeholder.fill(COLOR_SNAKE)
         return placeholder
+
+    def _load_corner_image(self) -> pygame.Surface | None:
+        """Load a corner PNG; return None when missing for graceful fallback."""
+
+        image = load_scaled_image("corner.png", (TILE_SIZE, TILE_SIZE))
+        if image is not None:
+            return image
+
+        return None
 
     @property
     def head(self):
@@ -192,7 +202,8 @@ class Snake:
             if index == 0:
                 # Head with chew animation and rotation
                 frame = self._get_rotated_head_frame()
-                angle = self._direction_to_angle(self._head_direction())
+                head_dir = self._head_direction_for_alpha(alpha)
+                angle = self._direction_to_angle(head_dir)
                 oriented = self._rotated_head(angle, frame)
                 self._blit_with_fade(surface, oriented, dest, fade_entry)
             elif index == len(self.segments) - 1:
@@ -204,9 +215,13 @@ class Snake:
                 oriented = self._rotated_body("tail", angle)
                 self._blit_with_fade(surface, oriented, dest, fade_entry)
             else:
-                angle = self._body_angle_from_positions(positions, index)
-                cache_key = "throat" if index == 1 else "body"
-                oriented = self._rotated_body(cache_key, angle)
+                corner_angle = self._corner_angle_from_positions(positions, index)
+                if corner_angle is not None and self.corner_image is not None:
+                    oriented = self._rotated_body("corner", corner_angle)
+                else:
+                    angle = self._body_angle_from_positions(positions, index)
+                    cache_key = "throat" if index == 1 else "body"
+                    oriented = self._rotated_body(cache_key, angle)
                 self._blit_with_fade(surface, oriented, dest, fade_entry)
 
     def _interpolated_positions(self, alpha: float) -> list[tuple[float, float]]:
@@ -284,11 +299,20 @@ class Snake:
             angle: pygame.transform.rotate(self.tail_image, angle) if angle else self.tail_image
             for angle in angles
         }
+        corner_cache = (
+            {
+                angle: pygame.transform.rotate(self.corner_image, angle) if angle else self.corner_image
+                for angle in angles
+            }
+            if self.corner_image is not None
+            else {}
+        )
         return {
             "head": head_cache,
             "body": body_cache,
             "throat": throat_cache,
             "tail": tail_cache,
+            "corner": corner_cache,
         }
 
     def _normalized_angle(self, angle: int) -> int:
@@ -322,6 +346,13 @@ class Snake:
                 return self._axis_direction(dx, dy)
         return self.pending_direction
 
+    def _head_direction_for_alpha(self, alpha: float) -> tuple[int, int]:
+        if not self.interp_ready:
+            return self._head_direction()
+        if alpha < 0.5:
+            return self.prev_direction
+        return self._head_direction()
+
     def _body_angle_from_positions(self, positions: list[tuple[float, float]], index: int) -> int:
         if index <= 0 or index >= len(positions) - 1:
             return self._body_angle(index)
@@ -342,6 +373,36 @@ class Snake:
             return self._direction_to_angle(dir1)
 
         return self._direction_to_angle(dir1)
+
+    def _corner_angle_from_positions(self, positions: list[tuple[float, float]], index: int) -> int | None:
+        if index <= 0 or index >= len(positions) - 1:
+            return None
+
+        prev_x, prev_y = positions[index - 1]
+        next_x, next_y = positions[index + 1]
+        x, y = positions[index]
+
+        dx1, dy1 = prev_x - x, prev_y - y
+        dx2, dy2 = next_x - x, next_y - y
+        dir1 = self._axis_direction(dx1, dy1)
+        dir2 = self._axis_direction(dx2, dy2)
+
+        if dir1 == (0, 0) or dir2 == (0, 0):
+            return None
+        if dir1 == dir2 or dir1 == (-dir2[0], -dir2[1]):
+            return None
+
+        dirs = {dir1, dir2}
+        if dirs == {(1, 0), (0, 1)}:
+            return 0
+        if dirs == {(-1, 0), (0, 1)}:
+            return 90
+        if dirs == {(-1, 0), (0, -1)}:
+            return 180
+        if dirs == {(1, 0), (0, -1)}:
+            return 270
+
+        return None
 
     def _axis_direction(self, dx: float, dy: float) -> tuple[int, int]:
         if abs(dx) >= abs(dy):
