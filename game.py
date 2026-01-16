@@ -245,8 +245,7 @@ class Game:
             return
 
         spawn = self._choose_spawn_position(candidates, min_wall_gap=8)
-        self.snake.segments = [spawn]
-        self.snake.reset_interpolation()
+        self._spawn_snake_with_tail(spawn, allowed_cells=self.playable_cells)
 
     def _choose_spawn_position(
         self,
@@ -278,6 +277,42 @@ class Game:
             abs(cell[0] - wall[0]) + abs(cell[1] - wall[1])
             for wall in self.wall_positions
         )
+
+    def _spawn_snake_with_tail(
+        self,
+        head_pos: tuple[int, int],
+        allowed_cells: set[tuple[int, int]] | None = None,
+    ) -> None:
+        if not self.snake:
+            return
+
+        def is_valid(cell: tuple[int, int]) -> bool:
+            x, y = cell
+            if x < 0 or x >= GRID_WIDTH or y < 0 or y >= GRID_HEIGHT:
+                return False
+            if cell in self.wall_positions:
+                return False
+            if allowed_cells is not None and cell not in allowed_cells:
+                return False
+            return True
+
+        preferred_dirs = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+        tail_pos = None
+        direction = self.snake.direction
+        for dx, dy in preferred_dirs:
+            candidate = (head_pos[0] - dx, head_pos[1] - dy)
+            if is_valid(candidate):
+                tail_pos = candidate
+                direction = (dx, dy)
+                break
+
+        if tail_pos is None:
+            tail_pos = head_pos
+
+        self.snake.segments = [head_pos, tail_pos]
+        self.snake.direction = direction
+        self.snake.pending_direction = direction
+        self.snake.reset_interpolation()
 
 
     def start_game(self):
@@ -919,7 +954,7 @@ class Game:
         self._reset_starfield()
         self._init_boss()
 
-        length = max(1, len(self.snake.segments))
+        length = max(2, len(self.snake.segments))
         y = entry_row if entry_row is not None else self.snake.head[1]
         y = max(0, min(GRID_HEIGHT - 1, y))
         head_x = min(GRID_WIDTH - 2, self.side_scroller_left_lock + max(0, length - 1))
@@ -1801,10 +1836,7 @@ class Game:
         if not candidates:
             candidates = list(self.sacrifice_left_cells)
         start_pos = self._choose_spawn_position(candidates, min_wall_gap=8)
-        self.snake.segments = [start_pos]
-        self.snake.direction = (1, 0)
-        self.snake.pending_direction = (1, 0)
-        self.snake.reset_interpolation()
+        self._spawn_snake_with_tail(start_pos, allowed_cells=self.sacrifice_left_cells)
 
     def shoot_sacrifice(self):
         if not self._can_shoot():
@@ -1851,7 +1883,7 @@ class Game:
         self.sacrifice_ammo -= 1
         if self.snake.grow_pending > 0:
             self.snake.grow_pending -= 1
-        elif len(self.snake.segments) > 1:
+        elif len(self.snake.segments) > 2:
             self.snake.segments.pop()
 
     def _fire_player_shot(self) -> bool:
