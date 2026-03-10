@@ -177,7 +177,13 @@ class Snake:
         self.prev_direction = self.direction
         self.interp_ready = False
 
-    def draw(self, surface: pygame.Surface, offset_y: int = 0, alpha: float = 0.0):
+    def draw(
+        self,
+        surface: pygame.Surface,
+        offset_y: int = 0,
+        alpha: float = 0.0,
+        offset_x_px: int = 0,
+    ):
         if not self.interp_ready:
             alpha = 0.0
         else:
@@ -190,9 +196,9 @@ class Snake:
         )
         positions = positions[: len(self.segments)]
         if len(positions) > 1:
-            self._draw_connectors(surface, positions, offset_y)
+            self._draw_connectors(surface, positions, offset_y, offset_x_px)
         for index, (x, y) in enumerate(positions):
-            dest = (int(x * TILE_SIZE), int(y * TILE_SIZE + offset_y))
+            dest = (int(x * TILE_SIZE + offset_x_px), int(y * TILE_SIZE + offset_y))
 
             # Determine fade overlay
             fade_alpha = fade_lookup.get((int(x), int(y)))
@@ -415,7 +421,13 @@ class Snake:
             return -1
         return 0
 
-    def _draw_connectors(self, surface: pygame.Surface, positions: list[tuple[float, float]], offset_y: int):
+    def _draw_connectors(
+        self,
+        surface: pygame.Surface,
+        positions: list[tuple[float, float]],
+        offset_y: int,
+        offset_x_px: int = 0,
+    ):
         half = TILE_SIZE / 2
         thickness = self.connector_thickness
         radius = self.connector_radius
@@ -424,9 +436,9 @@ class Snake:
             x2, y2 = positions[index]
             if abs(x1 - x2) > 1.5 or abs(y1 - y2) > 1.5:
                 continue
-            cx1 = x1 * TILE_SIZE + half
+            cx1 = x1 * TILE_SIZE + half + offset_x_px
             cy1 = y1 * TILE_SIZE + offset_y + half
-            cx2 = x2 * TILE_SIZE + half
+            cx2 = x2 * TILE_SIZE + half + offset_x_px
             cy2 = y2 * TILE_SIZE + offset_y + half
             dx = cx2 - cx1
             dy = cy2 - cy1

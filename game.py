@@ -1,4 +1,5 @@
 import json
+import math
 import random
 from collections import deque
 from pathlib import Path
@@ -97,7 +98,7 @@ class Game:
         self.last_frame_ms: int | None = None
         self.move_accumulator_ms = 0.0
         self.menu_page = "main"
-        self.menu_options = ["Start Game", "Settings", "Quit"]
+        self.menu_options = ["Start Game", "Settings", "Exit Game"]
         self.menu_index = 0
         self.input_locked = False
         self.queued_direction: tuple[int, int] | None = None
@@ -137,6 +138,7 @@ class Game:
         self.side_scroller_food_eaten = 0
         self.side_scroller_food_needed = 5
         self.side_scroller_trigger_x = GRID_WIDTH - 8
+        self.side_scroller_camera_x = 0.0
         self.space_fade = 0.0
         self.space_fade_time_ms = 0.0
         self.space_fade_duration_ms = 5000.0
@@ -161,6 +163,13 @@ class Game:
         self.boss_bullet_radius = max(2, int(TILE_SIZE * 0.25))
         self.boss_state = "hidden"
         self.boss_sprite = self._build_boss_sprite()
+        self.victory_active = False
+        self.victory_phase = "none"
+        self.victory_phase_time_ms = 0.0
+        self.victory_explosion_duration_ms = 1000.0
+        self.victory_fly_duration_ms = 4500.0
+        self.victory_message_fade_ms = 1800.0
+        self.victory_particles: list[dict] = []
         self.story_active = False
         self.story_text = ""
         self.story_next_action = ""
@@ -171,10 +180,26 @@ class Game:
         self.story_path_index = 0
         self.story_snake_length = 10
         self.story_snake: Snake | None = None
-        self.story_intro_text = "Placeholder intro"
-        self.story_mid_text = "Placeholder level 5-6"
-        self.story_end_text = "Placeholder sacrifice intro"
-        self.story_final_text = "Placeholder finale"
+        self.story_intro_text = (
+            "This is Snek. Snek is on a mission. A mission of growth. "
+            "Snek knows that all growth is hard. But Snek is not afraid of a challenge.\n\n"
+            "Are you?"
+        )
+        self.story_mid_text = (
+            "All growth is hard, Snek told me one day. But familiar things can help out. "
+            "Like your childhood game. Shapes and figures you are familiar with.\n\n"
+            "But familiarity does not mean easy."
+        )
+        self.story_end_text = (
+            "As we near the end, another important lesson approaches. "
+            "There can be no real growth without real sacrifice. "
+            "Snek is ready to give all he got!"
+        )
+        self.story_final_text = (
+            "Lastly, growth requires overcoming both your current place, and your current state. "
+            "Where you are, and what you are. These must change, if you are to grow. "
+            "Snek is ready. Are you?"
+        )
         self.intro_active = True
         self.intro_done = False
         self.intro_phase = "veil"
@@ -221,6 +246,7 @@ class Game:
         self.side_scroller_active = False
         self.escape_wall_open = False
         self.starfield = []
+        self.side_scroller_camera_x = 0.0
         self.side_scroller_food_eaten = 0
         self.space_fade = 0.0
         self.space_fade_time_ms = 0.0
@@ -231,6 +257,7 @@ class Game:
         self.boss_hp = 0
         self.boss_state = "hidden"
         self.boss_fire_timer_ms = 0.0
+        self._reset_victory_state()
 
     def _place_snake_for_level(self):
         if not self.snake:
@@ -345,6 +372,7 @@ class Game:
         self.sacrifice_explosions.clear()
         self.side_scroller_active = False
         self.starfield = []
+        self.side_scroller_camera_x = 0.0
         self.side_scroller_food_eaten = 0
         self.space_fade = 0.0
         self.space_fade_time_ms = 0.0
@@ -354,6 +382,7 @@ class Game:
         self.boss_active = False
         self.boss_hp = 0
         self.boss_state = "hidden"
+        self._reset_victory_state()
         self.start_music()
         self.start_story(self.story_intro_text, "begin_loading")
 
@@ -377,10 +406,12 @@ class Game:
         self.sacrifice_explosions.clear()
         self.side_scroller_active = False
         self.starfield = []
+        self.side_scroller_camera_x = 0.0
         self.player_shots.clear()
         self.boss_bullets.clear()
         self.boss_active = False
         self.boss_hp = 0
+        self._reset_victory_state()
         self.points = self.level_start_points
         self.elapsed_time_ms = self.level_start_time_ms
         self.start_music()
@@ -684,7 +715,7 @@ class Game:
                                 self.start_game()
                             elif selected == "Settings":
                                 self.menu_page = "settings"
-                            elif selected == "Quit":
+                            elif selected == "Exit Game":
                                 self.stop_music()
                                 self.running = False
                     elif self.menu_page == "settings":
@@ -725,6 +756,19 @@ class Game:
                         if event.key in (pygame.K_ESCAPE, pygame.K_BACKSPACE, pygame.K_RETURN, pygame.K_SPACE):
                             self.menu_page = "settings"
                 elif self.game_started:
+                    if self.victory_active:
+                        if event.key == pygame.K_ESCAPE:
+                            self.exit_to_menu()
+                        elif self.victory_phase == "name_entry":
+                            if event.key == pygame.K_RETURN:
+                                self.record_score()
+                                self.exit_to_menu()
+                            elif event.key == pygame.K_BACKSPACE:
+                                self.name_input = self.name_input[:-1]
+                            elif event.unicode and event.unicode.isalnum():
+                                if len(self.name_input) < self.name_max_length:
+                                    self.name_input += event.unicode
+                        continue
                     if event.key == pygame.K_n:
                         self.skip_level()
                         continue
@@ -809,6 +853,10 @@ class Game:
         dt_ms = now_ms - self.last_frame_ms
         self.last_frame_ms = now_ms
         dt_ms = min(dt_ms, 200)
+
+        if self.victory_active:
+            self._update_victory(dt_ms)
+            return
 
         if self.loading_active:
             self.update_loading()
@@ -958,6 +1006,7 @@ class Game:
         if not self.snake:
             return
         self.side_scroller_active = True
+        self.side_scroller_camera_x = 0.0
         self.wall_positions.clear()
         self.wall_layer_dirty = True
         self.breakable_wall_positions.clear()
@@ -974,6 +1023,7 @@ class Game:
         self.space_fade_active = False
         self._reset_starfield()
         self._init_boss()
+        self._reset_victory_state()
 
         length = max(2, len(self.snake.segments))
         y = entry_row if entry_row is not None else self.snake.head[1]
@@ -1180,10 +1230,146 @@ class Game:
     def _finish_boss(self):
         self.boss_active = False
         self.boss_state = "defeated"
-        self.side_scroller_active = False
         self.player_shots.clear()
         self.boss_bullets.clear()
-        self.start_story(self.story_final_text, "end_to_menu")
+        self._start_victory_sequence()
+
+    def _reset_victory_state(self):
+        self.victory_active = False
+        self.victory_phase = "none"
+        self.victory_phase_time_ms = 0.0
+        self.victory_particles = []
+
+    def _start_victory_sequence(self):
+        if not self.snake:
+            self.exit_to_menu()
+            return
+
+        self.victory_active = True
+        self.victory_phase = "explode"
+        self.victory_phase_time_ms = 0.0
+        self.victory_particles = self._build_victory_particles()
+        self.side_scroller_active = True
+        self.side_scroller_camera_x = max(0.0, self.snake.head[0] - GRID_WIDTH * 0.35)
+        self.name_input = ""
+        self.score_recorded = False
+        self.input_locked = True
+        self.queued_direction = None
+        self.last_frame_ms = pygame.time.get_ticks()
+        self.move_accumulator_ms = 0.0
+
+    def _build_victory_particles(self) -> list[dict]:
+        particles: list[dict] = []
+        boss_x, boss_y = self.boss_pos
+        cx = boss_x + self.boss_width * 0.5
+        cy = boss_y + self.boss_height * 0.5
+        colors = [
+            (80, 255, 170),
+            (30, 220, 120),
+            (120, 255, 200),
+            (45, 190, 110),
+        ]
+        count = 64
+        for _ in range(count):
+            angle = random.uniform(0.0, math.tau)
+            speed = random.uniform(3.0, 9.0)
+            life = random.uniform(450.0, 1050.0)
+            particles.append(
+                {
+                    "x": cx + random.uniform(-0.9, 0.9),
+                    "y": cy + random.uniform(-1.1, 1.1),
+                    "vx": math.cos(angle) * speed,
+                    "vy": math.sin(angle) * speed,
+                    "life": life,
+                    "max_life": life,
+                    "size": random.randint(2, 5),
+                    "color": random.choice(colors),
+                }
+            )
+        return particles
+
+    def _update_victory(self, dt_ms: float):
+        if not self.victory_active:
+            return
+
+        self._update_starfield(dt_ms)
+        self._update_victory_particles(dt_ms)
+
+        if self.victory_phase == "explode":
+            self.victory_phase_time_ms += dt_ms
+            if self.victory_phase_time_ms >= self.victory_explosion_duration_ms:
+                self.victory_phase = "flyout"
+                self.victory_phase_time_ms = 0.0
+                if self.snake:
+                    self.snake.direction = (1, 0)
+                    self.snake.pending_direction = (1, 0)
+                    self.snake.reset_interpolation()
+            return
+
+        if self.victory_phase == "flyout":
+            self.victory_phase_time_ms += dt_ms
+            self._advance_victory_snake(dt_ms)
+            self._update_victory_camera(dt_ms)
+            if self.victory_phase_time_ms >= self.victory_fly_duration_ms:
+                self.victory_phase = "message"
+                self.victory_phase_time_ms = 0.0
+            return
+
+        if self.victory_phase == "message":
+            self.victory_phase_time_ms += dt_ms
+            if self.victory_phase_time_ms >= self.victory_message_fade_ms:
+                self.victory_phase = "name_entry"
+                self.victory_phase_time_ms = self.victory_message_fade_ms
+            return
+
+    def _update_victory_particles(self, dt_ms: float):
+        if not self.victory_particles:
+            return
+        dt_sec = max(0.0, dt_ms / 1000.0)
+        alive: list[dict] = []
+        for particle in self.victory_particles:
+            particle["x"] += particle["vx"] * dt_sec
+            particle["y"] += particle["vy"] * dt_sec
+            particle["vx"] *= 0.98
+            particle["vy"] *= 0.98
+            particle["life"] -= dt_ms
+            if particle["life"] > 0:
+                alive.append(particle)
+        self.victory_particles = alive
+
+    def _advance_victory_snake(self, dt_ms: float):
+        if not self.snake:
+            return
+        move_interval_ms = 1000 / max(1e-6, FPS * self.speed_multiplier)
+        self.move_accumulator_ms += dt_ms
+        updates = 0
+        max_updates = 6
+        while self.move_accumulator_ms >= move_interval_ms:
+            self.move_accumulator_ms -= move_interval_ms
+            self.elapsed_time_ms += move_interval_ms
+            self.snake.direction = (1, 0)
+            self.snake.pending_direction = (1, 0)
+            self.snake.update()
+            updates += 1
+            if updates >= max_updates:
+                self.move_accumulator_ms = 0.0
+                break
+
+    def _update_victory_camera(self, dt_ms: float):
+        if not self.snake:
+            return
+        target_x = max(0.0, self.snake.head[0] - GRID_WIDTH * 0.35)
+        blend = min(1.0, max(0.0, dt_ms / 280.0))
+        self.side_scroller_camera_x += (target_x - self.side_scroller_camera_x) * blend
+
+    def _victory_overlay_alpha(self) -> float:
+        if not self.victory_active:
+            return 0.0
+        if self.victory_phase == "message":
+            return min(1.0, self.victory_phase_time_ms / max(1.0, self.victory_message_fade_ms))
+        if self.victory_phase == "name_entry":
+            return 1.0
+        return 0.0
 
     def _position_in_boss_area(self, pos: tuple[int, int]) -> bool:
         if not self.boss_active:
@@ -1302,6 +1488,7 @@ class Game:
         self.boss_active = False
         self.boss_hp = 0
         self.boss_state = "hidden"
+        self._reset_victory_state()
         self.space_fade = 0.0
         self.space_fade_time_ms = 0.0
         self.space_fade_active = False
@@ -1363,6 +1550,7 @@ class Game:
         self.draw_hud()
 
     def draw_side_scroller(self, flip: bool = True):
+        camera_offset_px = int(round(self.side_scroller_camera_x * TILE_SIZE))
         self.screen.fill((0, 0, 0))
         self.screen.blit(self.background, (0, HUD_HEIGHT))
         if self.space_fade > 0.0:
@@ -1371,18 +1559,21 @@ class Game:
             self.screen.blit(overlay, (0, HUD_HEIGHT))
         self._draw_starfield()
 
-        if self.food:
+        if self.food and not self.victory_active:
             self.food.draw(self.screen, HUD_HEIGHT)
-        self._draw_boss()
+        self._draw_boss(camera_offset_px)
         move_interval_ms = 1000 / max(1e-6, FPS * self.speed_multiplier)
         alpha = self._movement_alpha(self.move_accumulator_ms, move_interval_ms)
         if self.snake:
-            self.snake.draw(self.screen, HUD_HEIGHT, alpha=alpha)
-        self._draw_player_shots()
-        self._draw_boss_bullets()
+            self.snake.draw(self.screen, HUD_HEIGHT, alpha=alpha, offset_x_px=-camera_offset_px)
+        self._draw_player_shots(camera_offset_px)
+        self._draw_boss_bullets(camera_offset_px)
+        self._draw_victory_particles(camera_offset_px)
 
-        self.draw_hud_band()
-        self.draw_hud()
+        if not self.victory_active:
+            self.draw_hud_band()
+            self.draw_hud()
+        self._draw_victory_overlay()
         if flip:
             pygame.display.flip()
 
@@ -1433,30 +1624,30 @@ class Game:
                 int(star["size"]),
             )
 
-    def _draw_player_shots(self):
+    def _draw_player_shots(self, camera_offset_px: int = 0):
         if not self.player_shots:
             return
         for shot in self.player_shots:
             center = (
-                int(shot["x"] * TILE_SIZE),
+                int(shot["x"] * TILE_SIZE - camera_offset_px),
                 int(shot["y"] * TILE_SIZE + HUD_HEIGHT),
             )
             pygame.draw.circle(self.screen, COLOR_SNAKE, center, self.player_shot_radius)
 
-    def _draw_boss_bullets(self):
+    def _draw_boss_bullets(self, camera_offset_px: int = 0):
         if not self.boss_bullets:
             return
         for bullet in self.boss_bullets:
             center = (
-                int(bullet["x"] * TILE_SIZE),
+                int(bullet["x"] * TILE_SIZE - camera_offset_px),
                 int(bullet["y"] * TILE_SIZE + HUD_HEIGHT),
             )
             pygame.draw.circle(self.screen, (240, 80, 80), center, self.boss_bullet_radius)
 
-    def _draw_boss(self):
-        if not self.boss_active:
+    def _draw_boss(self, camera_offset_px: int = 0):
+        if not self.boss_active or self.victory_active:
             return
-        rect = self._boss_rect_pixels()
+        rect = self._boss_rect_pixels(camera_offset_px)
         if self.boss_sprite:
             self.screen.blit(self.boss_sprite, rect.topleft)
         else:
@@ -1470,14 +1661,68 @@ class Game:
             fill_rect = pygame.Rect(bar_rect.left, bar_rect.top, int(bar_rect.width * hp_ratio), bar_rect.height)
             pygame.draw.rect(self.screen, (255, 120, 120), fill_rect, border_radius=4)
 
-    def _boss_rect_pixels(self) -> pygame.Rect:
+    def _boss_rect_pixels(self, camera_offset_px: int = 0) -> pygame.Rect:
         boss_x, boss_y = self.boss_pos
         return pygame.Rect(
-            int(boss_x * TILE_SIZE),
+            int(boss_x * TILE_SIZE - camera_offset_px),
             int(boss_y * TILE_SIZE + HUD_HEIGHT),
             self.boss_width * TILE_SIZE,
             self.boss_height * TILE_SIZE,
         )
+
+    def _draw_victory_particles(self, camera_offset_px: int = 0):
+        if not self.victory_particles:
+            return
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        for particle in self.victory_particles:
+            life = particle["life"]
+            max_life = max(1.0, particle["max_life"])
+            alpha = int(255 * max(0.0, min(1.0, life / max_life)))
+            if alpha <= 0:
+                continue
+            px = int(particle["x"] * TILE_SIZE - camera_offset_px)
+            py = int(particle["y"] * TILE_SIZE + HUD_HEIGHT)
+            size_scale = 0.45 + 0.55 * (alpha / 255.0)
+            radius = max(1, int(particle["size"] * size_scale))
+            color = (*particle["color"], alpha)
+            pygame.draw.circle(overlay, color, (px, py), radius)
+        self.screen.blit(overlay, (0, 0))
+
+    def _draw_victory_overlay(self):
+        alpha = self._victory_overlay_alpha()
+        if alpha <= 0.0:
+            return
+
+        overlay_alpha = int(180 * alpha)
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, overlay_alpha))
+        self.screen.blit(overlay, (0, 0))
+
+        text_alpha = int(255 * alpha)
+        title = self.game_title_font.render("Thank you for playing", True, COLOR_HUD)
+        score = self.game_font.render(f"You got: {self.points}", True, COLOR_HUD)
+        title.set_alpha(text_alpha)
+        score.set_alpha(text_alpha)
+
+        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 24))
+        score_rect = score.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 8))
+        self.screen.blit(title, title_rect)
+        self.screen.blit(score, score_rect)
+
+        if self.victory_phase != "name_entry":
+            return
+
+        name_display = self.name_input if self.name_input else "_"
+        name_surface = self.menu_option_font.render(f"Name: {name_display}", True, COLOR_HUD)
+        hint_surface = self.menu_prompt_font.render(
+            "Press ENTER to save score, ESC to menu",
+            True,
+            COLOR_HUD,
+        )
+        name_rect = name_surface.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 54))
+        hint_rect = hint_surface.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 92))
+        self.screen.blit(name_surface, name_rect)
+        self.screen.blit(hint_surface, hint_rect)
 
     def draw_story_screen(self):
         self.screen.fill((0, 0, 0))
@@ -1495,16 +1740,23 @@ class Game:
         overlay.fill((0, 0, 0, 190))
         self.screen.blit(overlay, (0, 0))
 
-        box_width = int(SCREEN_WIDTH * 0.7)
-        box_height = 120
+        box_width = int(SCREEN_WIDTH * 0.72)
+        text_max_width = max(100, box_width - 28)
+        story_lines = self._wrap_story_text(self.story_text, text_max_width)
+        line_height = self.game_font.get_linesize()
+        box_height = max(120, len(story_lines) * line_height + 28)
         box_rect = pygame.Rect(0, 0, box_width, box_height)
         box_rect.center = (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 10)
         pygame.draw.rect(self.screen, (0, 0, 0), box_rect, border_radius=8)
         pygame.draw.rect(self.screen, COLOR_WALL, box_rect, width=2, border_radius=8)
 
-        title_text = self.game_title_font.render(self.story_text, True, COLOR_HUD)
-        title_rect = title_text.get_rect(center=box_rect.center)
-        self.screen.blit(title_text, title_rect)
+        text_y = box_rect.top + 14
+        for line in story_lines:
+            if line:
+                line_surface = self.game_font.render(line, True, COLOR_HUD)
+                line_rect = line_surface.get_rect(centerx=SCREEN_WIDTH // 2, top=text_y)
+                self.screen.blit(line_surface, line_rect)
+            text_y += line_height
 
         prompt_text = self.game_font.render("Press ENTER or SPACE to continue", True, COLOR_HUD)
         esc_text = self.game_font.render("ESC to go to main menu", True, COLOR_HUD)
@@ -1746,6 +1998,29 @@ class Game:
             return 1.0
         raw = min(1.0, max(0.0, accumulator_ms / interval_ms))
         return self._ease_out_alpha(raw)
+
+    def _wrap_story_text(self, text: str, max_width: int) -> list[str]:
+        if max_width <= 0:
+            return [text]
+
+        lines: list[str] = []
+        for paragraph in text.splitlines():
+            words = paragraph.split()
+            if not words:
+                lines.append("")
+                continue
+
+            current = words[0]
+            for word in words[1:]:
+                candidate = f"{current} {word}"
+                if self.game_font.size(candidate)[0] <= max_width:
+                    current = candidate
+                else:
+                    lines.append(current)
+                    current = word
+            lines.append(current)
+
+        return lines if lines else [""]
 
     def _direction_valid(self, new_dir: tuple[int, int], current_dir: tuple[int, int]) -> bool:
         cur_dx, cur_dy = current_dir
@@ -2518,6 +2793,7 @@ class Game:
         self.story_active = False
         self.side_scroller_active = False
         self.starfield = []
+        self.side_scroller_camera_x = 0.0
         self.side_scroller_food_eaten = 0
         self.space_fade = 0.0
         self.space_fade_time_ms = 0.0
@@ -2527,6 +2803,7 @@ class Game:
         self.boss_active = False
         self.boss_hp = 0
         self.boss_state = "hidden"
+        self._reset_victory_state()
         self.story_text = ""
         self.story_next_action = ""
         self.menu_page = "main"
