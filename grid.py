@@ -8,6 +8,24 @@ from config import (
     COLOR_BG_BOTTOM,
 )
 
+_GRID_OVERLAY_CACHE: dict[tuple[int, int], pygame.Surface] = {}
+
+
+def _get_grid_overlay(height: int, alpha: int) -> pygame.Surface:
+    key = (height, alpha)
+    cached = _GRID_OVERLAY_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    overlay = pygame.Surface((SCREEN_WIDTH, height), pygame.SRCALPHA)
+    line_color = (*COLOR_GRID, alpha)
+    for x in range(0, SCREEN_WIDTH, TILE_SIZE):
+        pygame.draw.line(overlay, line_color, (x, 0), (x, height))
+    for y in range(0, height, TILE_SIZE):
+        pygame.draw.line(overlay, line_color, (0, y), (SCREEN_WIDTH, y))
+    _GRID_OVERLAY_CACHE[key] = overlay
+    return overlay
+
 
 def build_background(height: int = PLAYFIELD_HEIGHT) -> pygame.Surface:
     """Pre-render a synthwave gradient background with a subtle grid overlay."""
@@ -23,22 +41,10 @@ def build_background(height: int = PLAYFIELD_HEIGHT) -> pygame.Surface:
         pygame.draw.line(surface, (r, g, b), (0, y), (SCREEN_WIDTH, y))
 
     # Neon grid overlay
-    grid_overlay = pygame.Surface((SCREEN_WIDTH, height), pygame.SRCALPHA)
-    line_color = (*COLOR_GRID, 90)
-    for x in range(0, SCREEN_WIDTH, TILE_SIZE):
-        pygame.draw.line(grid_overlay, line_color, (x, 0), (x, height))
-    for y in range(0, height, TILE_SIZE):
-        pygame.draw.line(grid_overlay, line_color, (0, y), (SCREEN_WIDTH, y))
-
-    surface.blit(grid_overlay, (0, 0))
+    surface.blit(_get_grid_overlay(height, 90), (0, 0))
     return surface
 
 
 def draw_grid(surface: pygame.Surface, offset_y: int = 0, height: int = PLAYFIELD_HEIGHT):
     """Draw a light neon grid overlay on top of the background."""
-
-    line_color = (*COLOR_GRID, 120)
-    for x in range(0, SCREEN_WIDTH, TILE_SIZE):
-        pygame.draw.line(surface, line_color, (x, offset_y), (x, offset_y + height))
-    for y in range(0, height, TILE_SIZE):
-        pygame.draw.line(surface, line_color, (0, offset_y + y), (SCREEN_WIDTH, offset_y + y))
+    surface.blit(_get_grid_overlay(height, 120), (0, offset_y))

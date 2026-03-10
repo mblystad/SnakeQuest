@@ -182,6 +182,7 @@ class Snake:
             alpha = 0.0
         else:
             alpha = max(0.0, min(1.0, alpha))
+        fade_lookup = {seg["pos"]: seg["alpha"] for seg in self.fading_segments}
         positions = (
             self._interpolated_positions(alpha)
             if self.interp_ready
@@ -194,10 +195,7 @@ class Snake:
             dest = (int(x * TILE_SIZE), int(y * TILE_SIZE + offset_y))
 
             # Determine fade overlay
-            fade_entry = next(
-                (seg for seg in self.fading_segments if seg["pos"] == (int(x), int(y))),
-                None,
-            )
+            fade_alpha = fade_lookup.get((int(x), int(y)))
 
             if index == 0:
                 # Head with chew animation and rotation
@@ -205,7 +203,7 @@ class Snake:
                 head_dir = self._head_direction_for_alpha(alpha)
                 angle = self._direction_to_angle(head_dir)
                 oriented = self._rotated_head(angle, frame)
-                self._blit_with_fade(surface, oriented, dest, fade_entry)
+                self._blit_with_fade(surface, oriented, dest, fade_alpha)
             elif index == len(self.segments) - 1:
                 # Tail pointing toward previous segment
                 cur_x, cur_y = positions[index]
@@ -213,7 +211,7 @@ class Snake:
                 dx, dy = cur_x - prev_x, cur_y - prev_y
                 angle = self._direction_to_angle(self._axis_direction(dx, dy))
                 oriented = self._rotated_body("tail", angle)
-                self._blit_with_fade(surface, oriented, dest, fade_entry)
+                self._blit_with_fade(surface, oriented, dest, fade_alpha)
             else:
                 corner_angle = self._corner_angle_from_positions(positions, index)
                 if corner_angle is not None and self.corner_image is not None:
@@ -222,7 +220,7 @@ class Snake:
                     angle = self._body_angle_from_positions(positions, index)
                     cache_key = "throat" if index == 1 else "body"
                     oriented = self._rotated_body(cache_key, angle)
-                self._blit_with_fade(surface, oriented, dest, fade_entry)
+                self._blit_with_fade(surface, oriented, dest, fade_alpha)
 
     def _interpolated_positions(self, alpha: float) -> list[tuple[float, float]]:
         current = list(self.segments)
@@ -240,9 +238,9 @@ class Snake:
             interpolated.append((ix, iy))
         return interpolated
 
-    def _blit_with_fade(self, surface: pygame.Surface, image: pygame.Surface, dest, fade_entry):
-        if fade_entry:
-            image.set_alpha(fade_entry["alpha"])
+    def _blit_with_fade(self, surface: pygame.Surface, image: pygame.Surface, dest, fade_alpha: int | None):
+        if fade_alpha is not None:
+            image.set_alpha(fade_alpha)
             surface.blit(image, dest)
             image.set_alpha(255)
         else:

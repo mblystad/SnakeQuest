@@ -1,6 +1,9 @@
-import audioop
 from pathlib import Path
 import pygame
+try:
+    import audioop
+except ImportError:
+    audioop = None
 
 from config import ASSET_DIR, FALLBACK_ASSET_DIR, SCREEN_HEIGHT, SCREEN_WIDTH
 from game import Game
@@ -59,7 +62,7 @@ def _load_splash_sound() -> pygame.mixer.Sound | None:
         width = max(1, abs(size) // 8)
         raw = base.get_raw()
 
-        if abs(SPLASH_SOUND_SPEED - 1.0) < 0.01:
+        if abs(SPLASH_SOUND_SPEED - 1.0) < 0.01 or audioop is None:
             converted = raw
         else:
             target_rate = int(freq / max(0.01, SPLASH_SOUND_SPEED))
@@ -164,4 +167,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

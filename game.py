@@ -16,6 +16,10 @@ from food import Food
 from config import load_scaled_image
 
 
+def can_open_gate(collected_food: int, button_active: bool, required_food: int) -> bool:
+    return collected_food >= required_food and button_active
+
+
 class Game:
     TETRIS_SHAPES = [
         ("I", [(0, 0), (1, 0), (2, 0), (3, 0)]),
@@ -26,6 +30,7 @@ class Game:
         ("L", [(0, 0), (0, 1), (0, 2), (1, 2)]),
         ("J", [(1, 0), (1, 1), (1, 2), (0, 2)]),
     ]
+    FRAME_RATE_CAP = 120
 
     def __init__(self):
         pygame.init()
@@ -50,6 +55,8 @@ class Game:
         self.button_pos: tuple[int, int] | None = None
         self.key_pos: tuple[int, int] | None = None
         self.wall_positions: set[tuple[int, int]] = set()
+        self.wall_layer: pygame.Surface | None = None
+        self.wall_layer_dirty = True
         self.key_image = load_scaled_image("key.png", (TILE_SIZE, TILE_SIZE))
         self.start_bg = load_scaled_image("menubg.png", (SCREEN_WIDTH, SCREEN_HEIGHT))
         self.start_bg_alt = load_scaled_image("menubg2.png", (SCREEN_WIDTH, SCREEN_HEIGHT))
@@ -99,6 +106,8 @@ class Game:
         self.score_recorded = False
         self.name_input = ""
         self.name_max_length = 10
+        self._hud_cache_key: tuple[int, int, str] | None = None
+        self._hud_surfaces: dict[str, pygame.Surface] = {}
         self.leaderboard_path = Path(__file__).with_name("leaderboard.json")
         self.leaderboard_entries: list[dict] = []
         self._load_leaderboard()
@@ -402,6 +411,7 @@ class Game:
         """Create a neon wall outline that also serves as collision."""
 
         self.wall_positions = set()
+        self.wall_layer_dirty = True
         self.breakable_wall_positions = set()
         self.playable_cells = None
         self.sacrifice_playable_cells = None
@@ -472,6 +482,11 @@ class Game:
 
     def place_gate_elements(self):
         """Place the button and key with increasing separation per level."""
+        if not self.snake:
+            self.button_pos = None
+            self.key_pos = None
+            return
+
         if self._in_escape_level():
             self.button_pos = None
             self.key_pos = None
@@ -480,51 +495,59 @@ class Game:
             self._place_sacrifice_gate()
             return
 
+        blocked = set(self.snake.segments)
         if self.playable_cells:
-            candidates = list(self.playable_cells)
+            candidates = [
+                pos
+                for pos in self.playable_cells
+                if pos not in blocked and pos not in self.wall_positions
+            ]
             random.shuffle(candidates)
             min_gap = 6 + self._shape_level_offset() * 2
-            button = None
+            if not candidates:
+                self.button_pos = None
+                self.key_pos = None
+                return
+
+            button = candidates[0]
             key = None
             for candidate in candidates:
-                if candidate == self.snake.head or candidate in self.wall_positions:
-                    continue
-                button = candidate
-                break
-            if button is None:
-                button = self.snake.head
-            for candidate in candidates:
-                if candidate == button or candidate == self.snake.head:
+                if candidate == button:
                     continue
                 if abs(candidate[0] - button[0]) + abs(candidate[1] - button[1]) < min_gap:
                     continue
                 key = candidate
                 break
             if key is None:
-                key = button
+                key = next((candidate for candidate in candidates if candidate != button), button)
             self.button_pos = button
             self.key_pos = key
             return
 
         min_gap = min(max(GRID_WIDTH, GRID_HEIGHT) - 2, 4 + self.level)
-        oriented_horizontal = random.choice([True, False])
+        candidates = [
+            (x, y)
+            for x in range(1, GRID_WIDTH - 1)
+            for y in range(1, GRID_HEIGHT - 1)
+            if (x, y) not in blocked and (x, y) not in self.wall_positions
+        ]
+        random.shuffle(candidates)
+        if not candidates:
+            self.button_pos = None
+            self.key_pos = None
+            return
 
-        if oriented_horizontal:
-            y = random.randint(2, GRID_HEIGHT - 3)
-            start_x = random.randint(1, max(1, GRID_WIDTH - min_gap - 2))
-            button = (start_x, y)
-            key = (min(start_x + min_gap, GRID_WIDTH - 2), y)
-        else:
-            x = random.randint(2, GRID_WIDTH - 3)
-            start_y = random.randint(1, max(1, GRID_HEIGHT - min_gap - 2))
-            button = (x, start_y)
-            key = (x, min(start_y + min_gap, GRID_HEIGHT - 2))
-
-        # Ensure the snake does not spawn on the gate elements
-        if button == self.snake.head or button in self.wall_positions:
-            button = (button[0], max(0, button[1] - 1))
-        if key == self.snake.head or key in self.wall_positions:
-            key = (key[0], min(GRID_HEIGHT - 1, key[1] + 1))
+        button = candidates[0]
+        key = None
+        for candidate in candidates:
+            if candidate == button:
+                continue
+            if abs(candidate[0] - button[0]) + abs(candidate[1] - button[1]) < min_gap:
+                continue
+            key = candidate
+            break
+        if key is None:
+            key = next((candidate for candidate in candidates if candidate != button), button)
 
         self.button_pos = button
         self.key_pos = key
@@ -627,8 +650,7 @@ class Game:
                         elif event.key == pygame.K_BACKSPACE:
                             self.name_input = self.name_input[:-1]
                         elif event.key == pygame.K_ESCAPE:
-                            self.stop_music()
-                            self.running = False
+                            self.exit_to_menu()
                         else:
                             if event.unicode and event.unicode.isalnum():
                                 if len(self.name_input) < self.name_max_length:
@@ -637,8 +659,7 @@ class Game:
                         if event.key == pygame.K_SPACE:
                             self.replay_level()
                         elif event.key == pygame.K_ESCAPE:
-                            self.stop_music()
-                            self.running = False
+                            self.exit_to_menu()
                     continue
 
                 if event.key == pygame.K_q:
@@ -753,9 +774,6 @@ class Game:
                         if event.key == pygame.K_s and self._can_shoot():
                             self.shoot_sacrifice()
                             continue
-                        if event.key == pygame.K_n:
-                            self.complete_level()
-                            continue
                         if event.key in (pygame.K_UP, pygame.K_w):
                             self.queue_direction((0, -1))
                         elif event.key in (pygame.K_DOWN, pygame.K_s):
@@ -815,6 +833,8 @@ class Game:
                     self.snake.set_direction(self.queued_direction)
                 self.queued_direction = None
             self.check_collisions()
+            if self.game_over:
+                break
             self.check_food_eaten()
             self.check_key_reached()
             self._check_escape_transition()
@@ -939,6 +959,7 @@ class Game:
             return
         self.side_scroller_active = True
         self.wall_positions.clear()
+        self.wall_layer_dirty = True
         self.breakable_wall_positions.clear()
         self.button_pos = None
         self.key_pos = None
@@ -1138,15 +1159,14 @@ class Game:
     def _check_side_scroller_collisions(self):
         if not self.snake:
             return
+        if self._snake_hit_self():
+            self._trigger_game_over()
+            return
         head_x, head_y = self.snake.head
         if self.boss_active:
             bx, by, bw, bh = self._boss_contact_hitbox_cells()
             if bx <= head_x < bx + bw and by <= head_y < by + bh:
-                self.play_sound("death")
-                self.game_over = True
-                self.game_started = False
-                self.game_paused = False
-                self.stop_music()
+                self._trigger_game_over()
                 return
 
         if not self.boss_bullets:
@@ -1154,11 +1174,7 @@ class Game:
         for bullet in self.boss_bullets:
             for seg in self.snake.segments:
                 if abs((seg[0] + 0.5) - bullet["x"]) <= 0.4 and abs((seg[1] + 0.5) - bullet["y"]) <= 0.4:
-                    self.play_sound("death")
-                    self.game_over = True
-                    self.game_started = False
-                    self.game_paused = False
-                    self.stop_music()
+                    self._trigger_game_over()
                     return
 
     def _finish_boss(self):
@@ -1185,31 +1201,23 @@ class Game:
 
         if self._in_sacrifice_levels():
             if not self.sacrifice_playable_cells or (head_x, head_y) not in self.sacrifice_playable_cells:
-                self.play_sound("death")
-                self.game_over = True
-                self.game_started = False
-                self.game_paused = False
-                self.stop_music()
+                self._trigger_game_over()
+                return
+            if self._snake_hit_self():
+                self._trigger_game_over()
             return
 
         # Wall collision ends game
         if head_x < 0 or head_x >= GRID_WIDTH or head_y < 0 or head_y >= GRID_HEIGHT:
-            self.play_sound("death")
-            self.game_over = True
-            self.game_started = False
-            self.game_paused = False
-            self.stop_music()
+            self._trigger_game_over()
             return
 
         if (head_x, head_y) in self.wall_positions:
-            self.play_sound("death")
-            self.game_over = True
-            self.game_started = False
-            self.game_paused = False
-            self.stop_music()
+            self._trigger_game_over()
             return
 
-        # TODO: self-collision later
+        if self._snake_hit_self():
+            self._trigger_game_over()
 
     def check_food_eaten(self):
         if self.snake.head == self.food.position:
@@ -1225,11 +1233,11 @@ class Game:
         if self.key_pos is None or self.button_pos is None:
             return
 
-        if self.level_food_eaten < self.required_food_for_level():
-            return
-
-        button_active = any(seg == self.button_pos for seg in self.snake.segments[1:])
-        if self.snake.head == self.key_pos and button_active:
+        if self.snake.head == self.key_pos and can_open_gate(
+            self.level_food_eaten,
+            self._gate_button_active(),
+            self.required_food_for_level(),
+        ):
             self.complete_level()
 
     def complete_level(self):
@@ -1347,9 +1355,7 @@ class Game:
         self.draw_button()
         self.draw_key()
         move_interval_ms = 1000 / max(1e-6, FPS * self.speed_multiplier)
-        alpha = 0.0
-        if move_interval_ms > 0:
-            alpha = min(1.0, max(0.0, self.move_accumulator_ms / move_interval_ms))
+        alpha = self._movement_alpha(self.move_accumulator_ms, move_interval_ms)
         if self.snake:
             self.snake.draw(self.screen, HUD_HEIGHT, alpha=alpha)
 
@@ -1369,9 +1375,7 @@ class Game:
             self.food.draw(self.screen, HUD_HEIGHT)
         self._draw_boss()
         move_interval_ms = 1000 / max(1e-6, FPS * self.speed_multiplier)
-        alpha = 0.0
-        if move_interval_ms > 0:
-            alpha = min(1.0, max(0.0, self.move_accumulator_ms / move_interval_ms))
+        alpha = self._movement_alpha(self.move_accumulator_ms, move_interval_ms)
         if self.snake:
             self.snake.draw(self.screen, HUD_HEIGHT, alpha=alpha)
         self._draw_player_shots()
@@ -1549,7 +1553,7 @@ class Game:
         pygame.draw.rect(self.screen, COLOR_BUTTON, rect)
 
     def draw_key(self):
-        if not self.key_pos:
+        if not self.key_pos or not self.snake:
             return
         x, y = self.key_pos
         dest = (x * TILE_SIZE, y * TILE_SIZE + HUD_HEIGHT)
@@ -1559,8 +1563,11 @@ class Game:
             rect = pygame.Rect(*dest, TILE_SIZE, TILE_SIZE)
             pygame.draw.rect(self.screen, COLOR_KEY, rect)
 
-        # Overlay lock indicator if button is not pressed yet
-        if not any(seg == self.button_pos for seg in self.snake.segments[1:]):
+        if not can_open_gate(
+            self.level_food_eaten,
+            self._gate_button_active(),
+            self.required_food_for_level(),
+        ):
             lock_overlay = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
             lock_overlay.fill((0, 0, 0, 120))
             self.screen.blit(lock_overlay, dest)
@@ -1568,13 +1575,10 @@ class Game:
     def draw_walls(self):
         if not self.wall_positions:
             return
-
-        for (x, y) in self.wall_positions:
-            rect = pygame.Rect(x * TILE_SIZE, y * TILE_SIZE + HUD_HEIGHT, TILE_SIZE, TILE_SIZE)
-            if (x, y) in self.breakable_wall_positions:
-                pygame.draw.rect(self.screen, COLOR_WALL, rect)
-            else:
-                pygame.draw.rect(self.screen, COLOR_WALL, rect, width=2, border_radius=4)
+        if self.wall_layer is None or self.wall_layer_dirty:
+            self._rebuild_wall_layer()
+        if self.wall_layer is not None:
+            self.screen.blit(self.wall_layer, (0, HUD_HEIGHT))
 
     def _build_sacrifice_shot_images(self) -> dict[tuple[int, int], pygame.Surface]:
         size = self.sacrifice_shot_size
@@ -1649,21 +1653,37 @@ class Game:
             pygame.draw.rect(self.screen, (0, 0, 0), (0, 0, SCREEN_WIDTH, HUD_HEIGHT))
 
     def draw_hud(self):
-        score_text = self.game_font.render(f"Score: {self.points}", True, COLOR_HUD)
-        level_text = self.game_font.render(f"Level: {self.level}", True, COLOR_HUD)
-        time_text = self.game_font.render(f"Time: {self.format_elapsed_time()}", True, COLOR_HUD)
+        elapsed = self.format_elapsed_time()
+        cache_key = (self.points, self.level, elapsed)
+        if self._hud_cache_key != cache_key:
+            score_label = f"Score: {self.points}"
+            level_label = f"Level: {self.level}"
+            time_label = f"Time: {elapsed}"
+            shadow_color = (0, 0, 0)
+            self._hud_surfaces = {
+                "score": self.game_font.render(score_label, True, COLOR_HUD),
+                "level": self.game_font.render(level_label, True, COLOR_HUD),
+                "time": self.game_font.render(time_label, True, COLOR_HUD),
+                "score_shadow": self.game_font.render(score_label, True, shadow_color),
+                "level_shadow": self.game_font.render(level_label, True, shadow_color),
+                "time_shadow": self.game_font.render(time_label, True, shadow_color),
+            }
+            self._hud_cache_key = cache_key
+
+        score_text = self._hud_surfaces["score"]
+        level_text = self._hud_surfaces["level"]
+        time_text = self._hud_surfaces["time"]
 
         padding = 12
         score_rect = score_text.get_rect(midleft=(padding, HUD_HEIGHT // 2))
         level_rect = level_text.get_rect(center=(SCREEN_WIDTH // 2, HUD_HEIGHT // 2))
         time_rect = time_text.get_rect(midright=(SCREEN_WIDTH - padding, HUD_HEIGHT // 2))
 
-        shadow_color = (0, 0, 0)
         shadow_offset = (2, 2)
 
-        score_shadow = self.game_font.render(f"Score: {self.points}", True, shadow_color)
-        level_shadow = self.game_font.render(f"Level: {self.level}", True, shadow_color)
-        time_shadow = self.game_font.render(f"Time: {self.format_elapsed_time()}", True, shadow_color)
+        score_shadow = self._hud_surfaces["score_shadow"]
+        level_shadow = self._hud_surfaces["level_shadow"]
+        time_shadow = self._hud_surfaces["time_shadow"]
         self.screen.blit(score_shadow, score_rect.move(*shadow_offset))
         self.screen.blit(level_shadow, level_rect.move(*shadow_offset))
         self.screen.blit(time_shadow, time_rect.move(*shadow_offset))
@@ -1674,6 +1694,34 @@ class Game:
     def play_sound(self, name: str):
         """Safe sound hook (no-op if audio assets are missing)."""
         return
+
+    def _trigger_game_over(self):
+        self.play_sound("death")
+        self.game_over = True
+        self.game_started = False
+        self.game_paused = False
+        self.stop_music()
+
+    def _snake_hit_self(self) -> bool:
+        if not self.snake or len(self.snake.segments) < 4:
+            return False
+        return self.snake.head in self.snake.segments[1:]
+
+    def _gate_button_active(self) -> bool:
+        if not self.snake or self.button_pos is None:
+            return False
+        return self.button_pos in self.snake.segments[1:]
+
+    def _rebuild_wall_layer(self):
+        layer = pygame.Surface((SCREEN_WIDTH, PLAYFIELD_HEIGHT), pygame.SRCALPHA)
+        for (x, y) in self.wall_positions:
+            rect = pygame.Rect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+            if (x, y) in self.breakable_wall_positions:
+                pygame.draw.rect(layer, COLOR_WALL, rect)
+            else:
+                pygame.draw.rect(layer, COLOR_WALL, rect, width=2, border_radius=4)
+        self.wall_layer = layer
+        self.wall_layer_dirty = False
 
     @staticmethod
     def _direction_to_angle(direction: tuple[int, int]) -> int:
@@ -1697,7 +1745,7 @@ class Game:
         if interval_ms <= 0:
             return 1.0
         raw = min(1.0, max(0.0, accumulator_ms / interval_ms))
-        return raw
+        return self._ease_out_alpha(raw)
 
     def _direction_valid(self, new_dir: tuple[int, int], current_dir: tuple[int, int]) -> bool:
         cur_dx, cur_dy = current_dir
@@ -1709,9 +1757,11 @@ class Game:
     def queue_direction(self, new_dir: tuple[int, int]):
         if not self.snake:
             return
+        if new_dir == self.snake.pending_direction:
+            return
 
         if not self.input_locked:
-            if self._direction_valid(new_dir, self.snake.direction):
+            if self._direction_valid(new_dir, self.snake.pending_direction):
                 self.snake.set_direction(new_dir)
                 self.input_locked = True
                 self.queued_direction = None
@@ -1803,24 +1853,22 @@ class Game:
             self.breakable_wall_positions.add(pos)
 
     def _place_sacrifice_gate(self):
-        if not self.sacrifice_right_cells:
+        if not self.sacrifice_right_cells or not self.snake:
             self.button_pos = None
             self.key_pos = None
             return
 
-        candidates = list(self.sacrifice_right_cells)
+        blocked = set(self.snake.segments)
+        candidates = [cell for cell in self.sacrifice_right_cells if cell not in blocked]
+        if not candidates:
+            self.button_pos = None
+            self.key_pos = None
+            return
         random.shuffle(candidates)
-        button = None
+        button = candidates[0]
         key = None
         for candidate in candidates:
-            if candidate == self.snake.head:
-                continue
-            button = candidate
-            break
-        if button is None:
-            button = self.snake.head
-        for candidate in candidates:
-            if candidate == button or candidate == self.snake.head:
+            if candidate == button:
                 continue
             key = candidate
             break
@@ -1971,6 +2019,7 @@ class Game:
         if hit_pos in self.breakable_wall_positions:
             self.breakable_wall_positions.discard(hit_pos)
             self.wall_positions.discard(hit_pos)
+            self.wall_layer_dirty = True
             if self.sacrifice_playable_cells is not None:
                 self.sacrifice_playable_cells.add(hit_pos)
             if self._in_sacrifice_levels():
@@ -2435,9 +2484,9 @@ class Game:
 
         title_text = self.game_title_font.render("Game Over", True, COLOR_HUD)
         if not self.score_recorded:
-            prompt_label = "Replay level? SPACE | ENTER to save | ESC to exit"
+            prompt_label = "Replay level? SPACE | ENTER to save | ESC to menu"
         else:
-            prompt_label = "Replay level? SPACE | ESC to exit"
+            prompt_label = "Replay level? SPACE | ESC to menu"
         prompt_text = self.game_font.render(prompt_label, True, COLOR_HUD)
 
         title_rect = title_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 20))
@@ -2554,7 +2603,7 @@ class Game:
 
     def run(self):
         while self.running:
-            self.clock.tick(60)
+            self.clock.tick(self.FRAME_RATE_CAP)
             self.handle_events()
             self.update()
             self.draw()
