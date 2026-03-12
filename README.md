@@ -25,6 +25,33 @@ python -m pip install pygame-ce
 python main.py
 ```
 
+## Android Port
+- `android_app.py` contains a touch-first Kivy port of the core SnakeQuest loop: menu, settings, HUD, loading animation, replay, and gate/key progression.
+- `main.py` now detects Android packaging and starts the Kivy app there, while desktop still runs the existing `pygame-ce` version.
+- `buildozer.spec` is included for APK builds.
+
+### Desktop preview of the Android port
+```bash
+python -m pip install kivy
+python android_app.py
+```
+
+### Build the APK
+As of March 12, 2026, the current Buildozer and Kivy docs still recommend building on Linux/macOS, or on Windows through WSL. Build inside the Linux filesystem, not directly from `/mnt/c/...`.
+
+Official references:
+- Buildozer installation: https://buildozer.readthedocs.io/en/latest/installation/
+- Buildozer quickstart: https://buildozer.readthedocs.io/en/1.5.0/quickstart.html
+- Kivy Android packaging guide: https://kivy.org/doc/stable-2.1.0/guide/packaging-android.html
+
+Typical WSL flow:
+```bash
+python3 -m pip install --user --upgrade buildozer
+buildozer -v android debug
+```
+
+The generated APK will be written under `bin/`.
+
 ## Controls
 - **Main Menu**: `Up/Down` (or `W/S`) to select, `Enter`/`Space` to confirm.
 - **Settings**: `Up/Down` to select, `Left/Right` to adjust, `1/2/3` set speed, `Enter` to open leaderboard, `Esc` to return.
