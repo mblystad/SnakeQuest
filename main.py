@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import time
 
 
 def _should_run_android_app() -> bool:
@@ -34,8 +35,8 @@ def _run_desktop() -> None:
     SPLASH_HOLD_MS = 2000
     SPLASH_SOUND_PLAY_MS = 1000
     SPLASH_FADE_OUT_MS = 1000
-    SPLASH_SKIP_DELAY_MS = 300
     SPLASH_FPS = 60
+    SPLASH_ENABLED = os.environ.get("SNAKEQUEST_SKIP_SPLASH", "0") != "1"
 
     def find_asset_path(filename: str) -> Path | None:
         for base_dir in (ASSET_DIR, FALLBACK_ASSET_DIR):
@@ -99,7 +100,7 @@ def _run_desktop() -> None:
         logo: pygame.Surface | None,
         sound: pygame.mixer.Sound | None,
     ) -> None:
-        if logo is None:
+        if not SPLASH_ENABLED or logo is None:
             return
 
         channel = None
@@ -119,6 +120,7 @@ def _run_desktop() -> None:
         pos_y = (SCREEN_HEIGHT - logo_y) // 2
 
         start_ms = pygame.time.get_ticks()
+        start_time = time.perf_counter()
         skip_requested = False
         sound_delay_ms = max(0, int(SPLASH_FADE_MS - SPLASH_SOUND_PLAY_MS))
         total_ms = max(
@@ -128,13 +130,14 @@ def _run_desktop() -> None:
 
         while True:
             elapsed = pygame.time.get_ticks() - start_ms
+            elapsed_wall_ms = int((time.perf_counter() - start_time) * 1000)
+            elapsed = max(elapsed, elapsed_wall_ms)
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     pygame.quit()
                     raise SystemExit
                 if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
-                    if elapsed >= SPLASH_SKIP_DELAY_MS:
-                        skip_requested = True
+                    skip_requested = True
 
             if (not sound_started) and (sound is not None) and elapsed >= sound_delay_ms:
                 try:
@@ -180,15 +183,16 @@ def _run_desktop() -> None:
 
     game = Game()
     game.run()
-
-
 def main() -> None:
-    if _should_run_android_app():
-        from android_app import run_android_app
+    try:
+        if _should_run_android_app():
+            from android_app import run_android_app
 
-        run_android_app()
+            run_android_app()
+            return
+        _run_desktop()
+    except KeyboardInterrupt:
         return
-    _run_desktop()
 
 
 if __name__ == "__main__":

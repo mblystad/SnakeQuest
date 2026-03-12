@@ -4,7 +4,10 @@ from config import TILE_SIZE, COLOR_FOOD, load_scaled_image
 class Food:
     def __init__(self, grid_pos=(10, 10)):
         self.position = grid_pos
-        self.image = load_scaled_image("food.png", (TILE_SIZE, TILE_SIZE))
+        self.image = (
+            load_scaled_image("f1.png", (TILE_SIZE, TILE_SIZE), smooth=False)
+            or load_scaled_image("food.png", (TILE_SIZE, TILE_SIZE), smooth=False)
+        )
 
     def draw(self, surface: pygame.Surface, offset_y: int = 0):
         x, y = self.position

@@ -49,6 +49,10 @@ class Game:
 
         self.music_enabled = False
         self.music_loaded = False
+        self.music_sound: pygame.mixer.Sound | None = None
+        self.music_fast_sound: pygame.mixer.Sound | None = None
+        self.music_channel: pygame.mixer.Channel | None = None
+        self.music_speed_factor = 1.0
         self._init_audio()
 
         self.snake: Snake | None = None
@@ -58,6 +62,9 @@ class Game:
         self.wall_positions: set[tuple[int, int]] = set()
         self.wall_layer: pygame.Surface | None = None
         self.wall_layer_dirty = True
+        self.button_image = load_scaled_image("button1.png", (TILE_SIZE, TILE_SIZE), smooth=False)
+        self.gate_image = load_scaled_image("gate.png", (TILE_SIZE, TILE_SIZE), smooth=False)
+        self.heart_image = load_scaled_image("heart.png", (TILE_SIZE, TILE_SIZE), smooth=False)
         self.key_image = load_scaled_image("key.png", (TILE_SIZE, TILE_SIZE))
         self.start_bg = load_scaled_image("menubg.png", (SCREEN_WIDTH, SCREEN_HEIGHT))
         self.start_bg_alt = load_scaled_image("menubg2.png", (SCREEN_WIDTH, SCREEN_HEIGHT))
@@ -107,6 +114,8 @@ class Game:
         self.score_recorded = False
         self.name_input = ""
         self.name_max_length = 10
+        self.gate_reveal_alpha = 0.0
+        self.gate_reveal_speed = 540.0
         self._hud_cache_key: tuple[int, int, str] | None = None
         self._hud_surfaces: dict[str, pygame.Surface] = {}
         self.leaderboard_path = Path(__file__).with_name("leaderboard.json")
@@ -243,6 +252,7 @@ class Game:
         self.story_active = False
         self.input_locked = False
         self.queued_direction = None
+        self.gate_reveal_alpha = 0.0
         self.side_scroller_active = False
         self.escape_wall_open = False
         self.starfield = []
@@ -488,28 +498,88 @@ class Game:
             return
 
         try:
-            pygame.mixer.music.load(music_path)
+            self.music_sound = pygame.mixer.Sound(music_path)
+            self.music_fast_sound = self._build_music_variant(self.music_sound, 2.0)
             self.music_enabled = True
             self.music_loaded = True
         except pygame.error:
             return
 
-    def start_music(self):
+    def _build_music_variant(
+        self,
+        source: pygame.mixer.Sound,
+        speed_factor: float,
+    ) -> pygame.mixer.Sound | None:
+        init = pygame.mixer.get_init()
+        if not init:
+            return source
+
+        _, size, channels = init
+        width = max(1, abs(size) // 8)
+        raw = source.get_raw()
+        converted = self._resample_raw_audio(raw, width, channels, speed_factor)
+        try:
+            return pygame.mixer.Sound(buffer=converted)
+        except (pygame.error, ValueError):
+            return source
+
+    @staticmethod
+    def _resample_raw_audio(raw: bytes, width: int, channels: int, speed_factor: float) -> bytes:
+        if speed_factor <= 0.0:
+            return raw
+
+        frame_size = max(1, width * max(1, channels))
+        frame_count = len(raw) // frame_size
+        if frame_count <= 1:
+            return raw
+
+        target_frames = max(1, int(frame_count / speed_factor))
+        converted = bytearray(target_frames * frame_size)
+        for out_index in range(target_frames):
+            src_index = min(frame_count - 1, int(out_index * speed_factor))
+            src_start = src_index * frame_size
+            dst_start = out_index * frame_size
+            converted[dst_start: dst_start + frame_size] = raw[src_start: src_start + frame_size]
+        return bytes(converted)
+
+    def start_music(self, speed_factor: float = 1.0):
         if not self.music_loaded:
             return
         if not self.sound_on:
+            self.stop_music()
             return
-        if pygame.mixer.music.get_busy():
+        if (
+            self.music_channel is not None
+            and self.music_channel.get_busy()
+            and abs(self.music_speed_factor - speed_factor) < 0.01
+        ):
             return
-        pygame.mixer.music.set_volume(0.4)
-        pygame.mixer.music.play(-1, fade_ms=1000)
+        if self.music_channel is not None and self.music_channel.get_busy():
+            self.music_channel.fadeout(300)
+
+        sound = self.music_sound
+        if speed_factor >= 1.5 and self.music_fast_sound is not None:
+            sound = self.music_fast_sound
+        if sound is None:
+            return
+
+        try:
+            self.music_channel = sound.play(loops=-1, fade_ms=1000)
+        except pygame.error:
+            self.music_channel = None
+            return
+        if self.music_channel is not None:
+            self.music_channel.set_volume(0.4)
+        self.music_speed_factor = speed_factor
 
     def stop_music(self, fade_ms: int = 1000):
         if not self.music_loaded:
             return
-        if not pygame.mixer.music.get_busy():
+        if self.music_channel is None or not self.music_channel.get_busy():
             return
-        pygame.mixer.music.fadeout(fade_ms)
+        self.music_channel.fadeout(fade_ms)
+        self.music_channel = None
+        self.music_speed_factor = 1.0
 
     def place_gate_elements(self):
         """Place the button and key with increasing separation per level."""
@@ -862,6 +932,8 @@ class Game:
             self.update_loading()
             return
 
+        self._update_gate_visuals(dt_ms)
+
         if self.side_scroller_active:
             self.update_side_scroller(dt_ms)
             return
@@ -965,6 +1037,11 @@ class Game:
                 if updates >= max_updates:
                     self.move_accumulator_ms = 0.0
                 continue
+            if self.snake.pending_direction == (1, 0) and head_x >= GRID_WIDTH - 1:
+                updates += 1
+                if updates >= max_updates:
+                    self.move_accumulator_ms = 0.0
+                continue
 
             self.snake.update()
             self._apply_side_scroller_bounds()
@@ -980,17 +1057,23 @@ class Game:
         if not self.snake:
             return
         head_x, head_y = self.snake.head
-        original = (head_x, head_y)
+        wrap_delta_y = 0
         if head_y < 0:
-            head_y = GRID_HEIGHT - 1
+            wrap_delta_y = GRID_HEIGHT
         elif head_y >= GRID_HEIGHT:
-            head_y = 0
-        if head_x < self.side_scroller_left_lock:
-            head_x = self.side_scroller_left_lock
-        if head_x >= GRID_WIDTH:
-            head_x = GRID_WIDTH - 1
-        if (head_x, head_y) != original:
-            self.snake.segments[0] = (head_x, head_y)
+            wrap_delta_y = -GRID_HEIGHT
+
+        if wrap_delta_y:
+            self.snake.segments = [
+                (segment_x, (segment_y + wrap_delta_y) % GRID_HEIGHT)
+                for segment_x, segment_y in self.snake.segments
+            ]
+            self.snake.reset_interpolation()
+            head_x, head_y = self.snake.head
+
+        clamped_x = max(self.side_scroller_left_lock, min(head_x, GRID_WIDTH - 1))
+        if clamped_x != head_x:
+            self.snake.segments[0] = (clamped_x, head_y)
             self.snake.reset_interpolation()
 
     def _check_escape_transition(self):
@@ -1093,7 +1176,7 @@ class Game:
         self.boss_dir = 1
         self.boss_fire_timer_ms = 0.0
         self.boss_target_x = GRID_WIDTH - self.boss_width - 2
-        self.boss_hp = 10
+        self.boss_hp = 7
         self.boss_active = False
         self.boss_state = "hidden"
 
@@ -1102,9 +1185,10 @@ class Game:
         self.boss_pos = (GRID_WIDTH + 2, float(boss_y))
         self.boss_dir = 1
         self.boss_fire_timer_ms = 0.0
-        self.boss_hp = 10
+        self.boss_hp = 7
         self.boss_active = True
         self.boss_state = "approach"
+        self.start_music(2.0)
 
     def _update_boss(self, dt_ms: float):
         if self.boss_state == "hidden":
@@ -1232,6 +1316,7 @@ class Game:
         self.boss_state = "defeated"
         self.player_shots.clear()
         self.boss_bullets.clear()
+        self.start_music(1.0)
         self._start_victory_sequence()
 
     def _reset_victory_state(self):
@@ -1654,7 +1739,7 @@ class Game:
             pygame.draw.rect(self.screen, (220, 70, 90), rect, border_radius=8)
 
         if self.boss_hp > 0:
-            hp_ratio = max(0.0, min(1.0, self.boss_hp / 10))
+            hp_ratio = max(0.0, min(1.0, self.boss_hp / 7))
             bar_height = max(4, TILE_SIZE // 5)
             bar_rect = pygame.Rect(rect.left, rect.top - bar_height - 4, rect.width, bar_height)
             pygame.draw.rect(self.screen, (40, 20, 30), bar_rect, border_radius=4)
@@ -1801,7 +1886,12 @@ class Game:
         if not self.button_pos:
             return
         x, y = self.button_pos
-        rect = pygame.Rect(x * TILE_SIZE, y * TILE_SIZE + HUD_HEIGHT, TILE_SIZE, TILE_SIZE)
+        dest = (x * TILE_SIZE, y * TILE_SIZE + HUD_HEIGHT)
+        if self.button_image:
+            self.screen.blit(self.button_image, dest)
+            return
+
+        rect = pygame.Rect(*dest, TILE_SIZE, TILE_SIZE)
         pygame.draw.rect(self.screen, COLOR_BUTTON, rect)
 
     def draw_key(self):
@@ -1809,11 +1899,44 @@ class Game:
             return
         x, y = self.key_pos
         dest = (x * TILE_SIZE, y * TILE_SIZE + HUD_HEIGHT)
-        if self.key_image:
-            self.screen.blit(self.key_image, dest)
-        else:
-            rect = pygame.Rect(*dest, TILE_SIZE, TILE_SIZE)
-            pygame.draw.rect(self.screen, COLOR_KEY, rect)
+        reveal_alpha = max(0, min(255, int(round(self.gate_reveal_alpha))))
+        gate_alpha = 255 - reveal_alpha
+
+        if self.heart_image and reveal_alpha > 0:
+            heart = self.heart_image.copy()
+            heart.set_alpha(reveal_alpha)
+            self.screen.blit(heart, dest)
+        elif reveal_alpha > 0:
+            heart_overlay = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+            pygame.draw.rect(
+                heart_overlay,
+                (*COLOR_KEY, reveal_alpha),
+                heart_overlay.get_rect(),
+                border_radius=4,
+            )
+            self.screen.blit(heart_overlay, dest)
+
+        gate_drawn = False
+        if self.gate_image:
+            gate = self.gate_image.copy()
+            gate.set_alpha(gate_alpha)
+            self.screen.blit(gate, dest)
+            gate_drawn = True
+        elif self.key_image:
+            gate = self.key_image.copy()
+            gate.set_alpha(gate_alpha)
+            self.screen.blit(gate, dest)
+            gate_drawn = True
+
+        if not gate_drawn:
+            gate_overlay = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+            pygame.draw.rect(
+                gate_overlay,
+                (*COLOR_KEY, gate_alpha),
+                gate_overlay.get_rect(),
+                border_radius=4,
+            )
+            self.screen.blit(gate_overlay, dest)
 
         if not can_open_gate(
             self.level_food_eaten,
@@ -1823,6 +1946,18 @@ class Game:
             lock_overlay = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
             lock_overlay.fill((0, 0, 0, 120))
             self.screen.blit(lock_overlay, dest)
+
+    def _update_gate_visuals(self, dt_ms: float):
+        if not self.snake or not self.key_pos or not self.button_pos:
+            self.gate_reveal_alpha = 0.0
+            return
+
+        target_alpha = 255.0 if self._gate_button_active() else 0.0
+        step = self.gate_reveal_speed * (dt_ms / 1000.0)
+        if self.gate_reveal_alpha < target_alpha:
+            self.gate_reveal_alpha = min(target_alpha, self.gate_reveal_alpha + step)
+        elif self.gate_reveal_alpha > target_alpha:
+            self.gate_reveal_alpha = max(target_alpha, self.gate_reveal_alpha - step)
 
     def draw_walls(self):
         if not self.wall_positions:
@@ -1835,21 +1970,11 @@ class Game:
     def _build_sacrifice_shot_images(self) -> dict[tuple[int, int], pygame.Surface]:
         size = self.sacrifice_shot_size
         corner = self.sacrifice_shot_corner
-        base = load_scaled_image("segment.png", (size, size))
-        if base is None:
-            base = pygame.Surface((size, size), pygame.SRCALPHA)
-            pygame.draw.rect(base, COLOR_SNAKE, base.get_rect(), border_radius=corner)
-            return {
-                (1, 0): base,
-                (-1, 0): base,
-                (0, -1): base,
-                (0, 1): base,
-            }
-
-        rounded = base.copy()
-        mask = pygame.Surface((size, size), pygame.SRCALPHA)
-        pygame.draw.rect(mask, (255, 255, 255, 255), mask.get_rect(), border_radius=corner)
-        rounded.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+        rounded = pygame.Surface((size, size), pygame.SRCALPHA)
+        pygame.draw.rect(rounded, COLOR_SNAKE, rounded.get_rect(), border_radius=corner)
+        highlight = rounded.get_rect().inflate(-max(2, size // 3), -max(2, size // 3))
+        if highlight.width > 0 and highlight.height > 0:
+            pygame.draw.rect(rounded, (180, 255, 248), highlight, border_radius=max(1, corner - 1))
 
         images: dict[tuple[int, int], pygame.Surface] = {}
         for direction in ((1, 0), (-1, 0), (0, -1), (0, 1)):
@@ -2046,6 +2171,8 @@ class Game:
             self.queued_direction = new_dir
 
     def _can_shoot(self) -> bool:
+        if not self.snake or len(self.snake.segments) <= 2:
+            return False
         return self._in_sacrifice_levels() or self._in_escape_level() or self.side_scroller_active
 
     def required_food_for_level(self) -> int:
@@ -2168,7 +2295,7 @@ class Game:
             return
         if not self.snake:
             return
-        if len(self.snake.segments) <= 1:
+        if len(self.snake.segments) <= 2:
             return
 
         if self.side_scroller_active:

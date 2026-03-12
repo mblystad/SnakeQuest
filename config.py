@@ -27,8 +27,10 @@ COLOR_HUD = (240, 225, 255)
 pygame.font.init()
 
 # Assets
-ASSET_DIR = Path(__file__).parent / "assets"
-FALLBACK_ASSET_DIR = Path(__file__).parent
+PROJECT_DIR = Path(__file__).parent
+ASSET_DIR = PROJECT_DIR / "assets"
+FALLBACK_ASSET_DIR = PROJECT_DIR
+ASSET_SEARCH_DIRS = (ASSET_DIR, FALLBACK_ASSET_DIR)
 
 PIXEL_FONT_FILES = (
     "PressStart2P-Regular.ttf",
@@ -50,8 +52,7 @@ UI_FONT_FILE = "Vipnagorgialla_Rg.otf"
 
 def load_pixel_font(size: int) -> pygame.font.Font:
     """Load an 8-bit style font with graceful fallbacks."""
-    search_dirs = (ASSET_DIR, FALLBACK_ASSET_DIR)
-    for base_dir in search_dirs:
+    for base_dir in ASSET_SEARCH_DIRS:
         for filename in PIXEL_FONT_FILES:
             path = base_dir / filename
             if not path.exists():
@@ -71,8 +72,7 @@ def load_pixel_font(size: int) -> pygame.font.Font:
 
 def load_custom_font(filename: str, size: int) -> pygame.font.Font:
     """Load a specific font file with pixel fallback."""
-    search_dirs = (ASSET_DIR, FALLBACK_ASSET_DIR)
-    for base_dir in search_dirs:
+    for base_dir in ASSET_SEARCH_DIRS:
         path = base_dir / filename
         if not path.exists():
             continue
@@ -91,9 +91,8 @@ def load_scaled_image(filename: str, size: tuple[int, int], *, smooth: bool = Tr
     gracefully fall back to procedural placeholders.
     """
 
-    search_dirs = (ASSET_DIR, FALLBACK_ASSET_DIR)
     image = None
-    for base_dir in search_dirs:
+    for base_dir in ASSET_SEARCH_DIRS:
         path = base_dir / filename
         if not path.exists():
             continue
