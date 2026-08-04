@@ -1,23 +1,9 @@
-from __future__ import annotations
-
 import os
 from pathlib import Path
 import time
 
 
-def _should_run_android_app() -> bool:
-    if os.environ.get("SNAKEQUEST_ANDROID") == "1":
-        return True
-    if os.environ.get("ANDROID_ARGUMENT"):
-        return True
-    try:
-        from kivy.utils import platform as kivy_platform
-    except ImportError:
-        return False
-    return kivy_platform == "android"
-
-
-def _run_desktop() -> None:
+def main() -> None:
     import pygame
 
     try:
@@ -183,17 +169,10 @@ def _run_desktop() -> None:
 
     game = Game()
     game.run()
-def main() -> None:
-    try:
-        if _should_run_android_app():
-            from android_app import run_android_app
-
-            run_android_app()
-            return
-        _run_desktop()
-    except KeyboardInterrupt:
-        return
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass

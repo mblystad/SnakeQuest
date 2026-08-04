@@ -9,9 +9,9 @@ class Food:
             or load_scaled_image("food.png", (TILE_SIZE, TILE_SIZE), smooth=False)
         )
 
-    def draw(self, surface: pygame.Surface, offset_y: int = 0):
+    def draw(self, surface: pygame.Surface, offset_y: int = 0, offset_x_px: int = 0):
         x, y = self.position
-        dest = (x * TILE_SIZE, y * TILE_SIZE + offset_y)
+        dest = (x * TILE_SIZE + offset_x_px, y * TILE_SIZE + offset_y)
 
         if self.image:
             surface.blit(self.image, dest)

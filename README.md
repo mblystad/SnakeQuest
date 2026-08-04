@@ -25,33 +25,6 @@ python -m pip install pygame-ce
 python main.py
 ```
 
-## Android Port
-- `android_app.py` contains a touch-first Kivy port of the core SnakeQuest loop: menu, settings, HUD, loading animation, replay, and gate/key progression.
-- `main.py` now detects Android packaging and starts the Kivy app there, while desktop still runs the existing `pygame-ce` version.
-- `buildozer.spec` is included for APK builds.
-
-### Desktop preview of the Android port
-```bash
-python -m pip install kivy
-python android_app.py
-```
-
-### Build the APK
-As of March 12, 2026, the current Buildozer and Kivy docs still recommend building on Linux/macOS, or on Windows through WSL. Build inside the Linux filesystem, not directly from `/mnt/c/...`.
-
-Official references:
-- Buildozer installation: https://buildozer.readthedocs.io/en/latest/installation/
-- Buildozer quickstart: https://buildozer.readthedocs.io/en/1.5.0/quickstart.html
-- Kivy Android packaging guide: https://kivy.org/doc/stable-2.1.0/guide/packaging-android.html
-
-Typical WSL flow:
-```bash
-python3 -m pip install --user --upgrade buildozer
-buildozer -v android debug
-```
-
-The generated APK will be written under `bin/`.
-
 ## Controls
 - **Main Menu**: `Up/Down` (or `W/S`) to select, `Enter`/`Space` to confirm.
 - **Settings**: `Up/Down` to select, `Left/Right` to adjust, `1/2/3` set speed, `Enter` to open leaderboard, `Esc` to return.
@@ -79,3 +52,10 @@ Missing assets fall back to simple shapes/colors.
 ## Project layout
 - `main.py` entry point.
 - `game.py`, `snake.py`, `food.py`, `grid.py`, `config.py` core logic and rendering.
+- `tests/` lightweight desktop logic tests.
+
+## Finish Checklist
+- Play through every level group at each speed setting: normal gates, Tetris arenas, sacrifice arenas, escape, and final boss.
+- Tune required food, arena spacing, ammo, and boss health from observed playthrough time instead of guessing in code.
+- Replace placeholder/fallback visuals only where they improve readability. Missing assets must remain non-fatal.
+- Keep the desktop pygame version as the source of truth. Any future mobile port should live in a separate branch or package.

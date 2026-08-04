@@ -30,8 +30,8 @@ class Snake:
         self.connector_thickness = max(4, int(TILE_SIZE * 0.6))
         self.connector_radius = max(2, int(self.connector_thickness * 0.5))
 
-        # Fade-in animation for growing segments
-        # Each entry: {"pos": (x, y), "alpha": int}
+        # Fade-in animation for newly grown tail segments.
+        # Each entry: {"index_from_tail": int, "alpha": int}
         self.fading_segments = []
         self.fade_speed = 40  # Alpha increase per update
 
@@ -135,8 +135,7 @@ class Snake:
         self.grow_pending += amount
 
         if self.segments:
-            tail_pos = self.segments[-1]
-            self.fading_segments.append({"pos": tail_pos, "alpha": 0})
+            self.fading_segments.append({"index_from_tail": 0, "alpha": 0})
 
     def update(self):
         """Move the snake and update animations."""
@@ -188,7 +187,7 @@ class Snake:
             alpha = 0.0
         else:
             alpha = max(0.0, min(1.0, alpha))
-        fade_lookup = {seg["pos"]: seg["alpha"] for seg in self.fading_segments}
+        fade_lookup = self._fade_lookup_by_index()
         positions = (
             self._interpolated_positions(alpha)
             if self.interp_ready
@@ -200,8 +199,7 @@ class Snake:
         for index, (x, y) in enumerate(positions):
             dest = (int(x * TILE_SIZE + offset_x_px), int(y * TILE_SIZE + offset_y))
 
-            # Determine fade overlay
-            fade_alpha = fade_lookup.get((int(x), int(y)))
+            fade_alpha = fade_lookup.get(index)
 
             if index == 0:
                 # Head with chew animation and rotation
@@ -246,11 +244,21 @@ class Snake:
 
     def _blit_with_fade(self, surface: pygame.Surface, image: pygame.Surface, dest, fade_alpha: int | None):
         if fade_alpha is not None:
-            image.set_alpha(fade_alpha)
-            surface.blit(image, dest)
-            image.set_alpha(255)
+            faded = image.copy()
+            faded.set_alpha(fade_alpha)
+            surface.blit(faded, dest)
         else:
             surface.blit(image, dest)
+
+    def _fade_lookup_by_index(self) -> dict[int, int]:
+        fade_lookup: dict[int, int] = {}
+        last_index = len(self.segments) - 1
+        for fade in self.fading_segments:
+            index_from_tail = int(fade.get("index_from_tail", 0))
+            index = last_index - index_from_tail
+            if 0 <= index <= last_index:
+                fade_lookup[index] = int(fade["alpha"])
+        return fade_lookup
 
     @staticmethod
     def _direction_to_angle(direction: tuple[int, int]) -> int:

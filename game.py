@@ -1645,7 +1645,7 @@ class Game:
         self._draw_starfield()
 
         if self.food and not self.victory_active:
-            self.food.draw(self.screen, HUD_HEIGHT)
+            self.food.draw(self.screen, HUD_HEIGHT, offset_x_px=-camera_offset_px)
         self._draw_boss(camera_offset_px)
         move_interval_ms = 1000 / max(1e-6, FPS * self.speed_multiplier)
         alpha = self._movement_alpha(self.move_accumulator_ms, move_interval_ms)
