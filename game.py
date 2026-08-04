@@ -864,7 +864,7 @@ class Game:
                                 self.begin_loading()
                             elif self.level == self.escape_level:
                                 self.level_clear = False
-                                self.start_story(self.story_final_text, "end_to_menu")
+                                self._debug_advance_escape_level()
                             else:
                                 self.level += 1
                                 self.level_clear = False
@@ -1037,14 +1037,11 @@ class Game:
                 if updates >= max_updates:
                     self.move_accumulator_ms = 0.0
                 continue
-            if self.snake.pending_direction == (1, 0) and head_x >= GRID_WIDTH - 1:
-                updates += 1
-                if updates >= max_updates:
-                    self.move_accumulator_ms = 0.0
-                continue
 
             self.snake.update()
             self._apply_side_scroller_bounds()
+            if self.game_over:
+                break
             self.check_food_eaten()
             updates += 1
             if updates >= max_updates:
@@ -1065,13 +1062,17 @@ class Game:
 
         if wrap_delta_y:
             self.snake.segments = [
-                (segment_x, (segment_y + wrap_delta_y) % GRID_HEIGHT)
+                (segment_x, segment_y + wrap_delta_y)
                 for segment_x, segment_y in self.snake.segments
             ]
             self.snake.reset_interpolation()
             head_x, head_y = self.snake.head
 
-        clamped_x = max(self.side_scroller_left_lock, min(head_x, GRID_WIDTH - 1))
+        if head_x >= GRID_WIDTH:
+            self._trigger_game_over()
+            return
+
+        clamped_x = max(self.side_scroller_left_lock, head_x)
         if clamped_x != head_x:
             self.snake.segments[0] = (clamped_x, head_y)
             self.snake.reset_interpolation()
@@ -1548,7 +1549,7 @@ class Game:
                 self.begin_loading()
             elif self.level == self.escape_level:
                 self.level_clear = False
-                self.start_story(self.story_final_text, "end_to_menu")
+                self._debug_advance_escape_level()
             else:
                 self.level += 1
                 self.level_clear = False
@@ -1561,7 +1562,26 @@ class Game:
         if self.game_paused:
             self.game_paused = False
         if self.game_started:
+            if self._in_escape_level():
+                self._debug_advance_escape_level()
+                return
             self.complete_level()
+
+    def _debug_advance_escape_level(self):
+        if not self.snake:
+            return
+        if not self.food:
+            self.food = Food()
+
+        if not self.side_scroller_active:
+            self.enter_side_scroller()
+            self.sacrifice_ammo = max(self.sacrifice_ammo, 10)
+            return
+
+        if self.boss_state == "hidden":
+            self.sacrifice_ammo = max(self.sacrifice_ammo, 10)
+            self.space_fade = 1.0
+            self._start_boss_approach()
 
     def jump_to_final_boss(self):
         """Debug helper: jump straight to the final boss fight."""

@@ -9,6 +9,7 @@ import pygame
 pygame.init()
 pygame.display.set_mode((1, 1))
 
+from config import GRID_HEIGHT, GRID_WIDTH
 from game import Game, can_open_gate
 from food import Food
 from snake import Snake
@@ -56,6 +57,55 @@ class CoreLogicTests(unittest.TestCase):
         game.snake.segments = [(42, 5), (41, 5), (40, 5)]
 
         self.assertTrue(game._victory_snake_has_left_screen())
+
+    def test_skip_escape_level_does_not_show_final_story(self):
+        game = Game()
+        game.game_started = True
+        game.level = game.escape_level
+        game.snake = Snake()
+        game.food = Food()
+
+        game.skip_level()
+
+        self.assertFalse(game.story_active)
+        self.assertNotEqual(game.story_next_action, "end_to_menu")
+        self.assertTrue(game.side_scroller_active)
+
+    def test_escape_level_clear_continuation_does_not_show_final_story(self):
+        game = Game()
+        game.game_started = True
+        game.level = game.escape_level
+        game.level_clear = True
+        game.snake = Snake()
+        game.food = Food()
+
+        game.skip_level()
+
+        self.assertFalse(game.story_active)
+        self.assertNotEqual(game.story_next_action, "end_to_menu")
+        self.assertFalse(game.level_clear)
+        self.assertTrue(game.side_scroller_active)
+
+    def test_side_scroller_vertical_wrap_translates_whole_snake(self):
+        game = Game()
+        game.snake = Snake()
+        game.snake.segments = [(5, -1), (5, 0), (5, 1)]
+
+        game._apply_side_scroller_bounds()
+
+        self.assertEqual(game.snake.segments, [(5, GRID_HEIGHT - 1), (5, GRID_HEIGHT), (5, GRID_HEIGHT + 1)])
+
+    def test_side_scroller_right_exit_kills_snake(self):
+        game = Game()
+        game.game_started = True
+        game.side_scroller_active = True
+        game.snake = Snake()
+        game.snake.segments = [(GRID_WIDTH, 5), (GRID_WIDTH - 1, 5)]
+
+        game._apply_side_scroller_bounds()
+
+        self.assertTrue(game.game_over)
+        self.assertFalse(game.game_started)
 
     def test_food_never_spawns_on_blocked_cells(self):
         game = Game()
