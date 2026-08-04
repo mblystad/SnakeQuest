@@ -39,6 +39,24 @@ class CoreLogicTests(unittest.TestCase):
         self.assertEqual(game.snake.pending_direction, (0, -1))
         self.assertEqual(game.queued_direction, (-1, 0))
 
+    def test_fire_key_is_f_not_s(self):
+        game = Game()
+
+        self.assertTrue(game._is_fire_key(pygame.K_f))
+        self.assertFalse(game._is_fire_key(pygame.K_s))
+
+    def test_victory_flyout_waits_for_snake_to_leave_screen(self):
+        game = Game()
+        game.snake = Snake()
+        game.snake.segments = [(5, 5), (4, 5), (3, 5)]
+        game.side_scroller_camera_x = 0.0
+
+        self.assertFalse(game._victory_snake_has_left_screen())
+
+        game.snake.segments = [(42, 5), (41, 5), (40, 5)]
+
+        self.assertTrue(game._victory_snake_has_left_screen())
+
     def test_food_never_spawns_on_blocked_cells(self):
         game = Game()
         game.snake = Snake()

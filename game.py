@@ -175,8 +175,8 @@ class Game:
         self.victory_active = False
         self.victory_phase = "none"
         self.victory_phase_time_ms = 0.0
-        self.victory_explosion_duration_ms = 1000.0
-        self.victory_fly_duration_ms = 4500.0
+        self.victory_explosion_duration_ms = 1800.0
+        self.victory_fly_duration_ms = 7000.0
         self.victory_message_fade_ms = 1800.0
         self.victory_particles: list[dict] = []
         self.story_active = False
@@ -885,7 +885,7 @@ class Game:
                             self.game_paused = True
                             self.last_frame_ms = pygame.time.get_ticks()
                             continue
-                        if event.key == pygame.K_s and self._can_shoot():
+                        if self._is_fire_key(event.key) and self._can_shoot():
                             self.shoot_sacrifice()
                             continue
                         if event.key in (pygame.K_UP, pygame.K_w):
@@ -1353,21 +1353,24 @@ class Game:
             (30, 220, 120),
             (120, 255, 200),
             (45, 190, 110),
+            (255, 210, 90),
+            (255, 95, 120),
+            (255, 255, 255),
         ]
-        count = 64
+        count = 150
         for _ in range(count):
             angle = random.uniform(0.0, math.tau)
-            speed = random.uniform(3.0, 9.0)
-            life = random.uniform(450.0, 1050.0)
+            speed = random.uniform(4.0, 16.0)
+            life = random.uniform(700.0, self.victory_explosion_duration_ms)
             particles.append(
                 {
-                    "x": cx + random.uniform(-0.9, 0.9),
-                    "y": cy + random.uniform(-1.1, 1.1),
+                    "x": cx + random.uniform(-1.3, 1.3),
+                    "y": cy + random.uniform(-1.5, 1.5),
                     "vx": math.cos(angle) * speed,
                     "vy": math.sin(angle) * speed,
                     "life": life,
                     "max_life": life,
-                    "size": random.randint(2, 5),
+                    "size": random.randint(3, 9),
                     "color": random.choice(colors),
                 }
             )
@@ -1377,7 +1380,8 @@ class Game:
         if not self.victory_active:
             return
 
-        self._update_starfield(dt_ms)
+        if self.victory_phase != "explode":
+            self._update_starfield(dt_ms)
         self._update_victory_particles(dt_ms)
 
         if self.victory_phase == "explode":
@@ -1394,8 +1398,10 @@ class Game:
         if self.victory_phase == "flyout":
             self.victory_phase_time_ms += dt_ms
             self._advance_victory_snake(dt_ms)
-            self._update_victory_camera(dt_ms)
-            if self.victory_phase_time_ms >= self.victory_fly_duration_ms:
+            if (
+                self._victory_snake_has_left_screen()
+                or self.victory_phase_time_ms >= self.victory_fly_duration_ms
+            ):
                 self.victory_phase = "message"
                 self.victory_phase_time_ms = 0.0
             return
@@ -1446,6 +1452,13 @@ class Game:
         target_x = max(0.0, self.snake.head[0] - GRID_WIDTH * 0.35)
         blend = min(1.0, max(0.0, dt_ms / 280.0))
         self.side_scroller_camera_x += (target_x - self.side_scroller_camera_x) * blend
+
+    def _victory_snake_has_left_screen(self) -> bool:
+        if not self.snake or not self.snake.segments:
+            return True
+        camera_right = self.side_scroller_camera_x + GRID_WIDTH
+        tail_x = min(pos[0] for pos in self.snake.segments)
+        return tail_x > camera_right + 2
 
     def _victory_overlay_alpha(self) -> float:
         if not self.victory_active:
@@ -1653,6 +1666,7 @@ class Game:
             self.snake.draw(self.screen, HUD_HEIGHT, alpha=alpha, offset_x_px=-camera_offset_px)
         self._draw_player_shots(camera_offset_px)
         self._draw_boss_bullets(camera_offset_px)
+        self._draw_victory_boss_explosion(camera_offset_px)
         self._draw_victory_particles(camera_offset_px)
 
         if not self.victory_active:
@@ -1773,6 +1787,50 @@ class Game:
             pygame.draw.circle(overlay, color, (px, py), radius)
         self.screen.blit(overlay, (0, 0))
 
+    def _draw_victory_boss_explosion(self, camera_offset_px: int = 0):
+        if not self.victory_active or self.victory_phase != "explode":
+            return
+
+        progress = min(1.0, max(0.0, self.victory_phase_time_ms / max(1.0, self.victory_explosion_duration_ms)))
+        boss_rect = self._boss_rect_pixels(camera_offset_px)
+        center = boss_rect.center
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+
+        flash_alpha = int(170 * max(0.0, 1.0 - progress))
+        flash_radius = int(TILE_SIZE * (2.2 + 8.5 * progress))
+        pygame.draw.circle(overlay, (255, 245, 190, flash_alpha), center, flash_radius)
+
+        for offset, color in (
+            (0.00, (255, 255, 255)),
+            (0.16, (255, 205, 90)),
+            (0.32, (255, 80, 140)),
+        ):
+            ring_progress = min(1.0, max(0.0, progress - offset) / max(0.01, 1.0 - offset))
+            ring_alpha = int(230 * (1.0 - ring_progress))
+            if ring_alpha <= 0:
+                continue
+            radius = int(TILE_SIZE * (1.4 + 11.0 * ring_progress))
+            width = max(2, int(TILE_SIZE * (0.32 - 0.22 * ring_progress)))
+            pygame.draw.circle(overlay, (*color, ring_alpha), center, radius, width=width)
+
+        if self.boss_sprite:
+            scale = 1.0 + 1.4 * progress
+            width = max(1, int(boss_rect.width * scale))
+            height = max(1, int(boss_rect.height * scale))
+            head = pygame.transform.smoothscale(self.boss_sprite, (width, height))
+            head.set_alpha(int(255 * max(0.0, 1.0 - progress)))
+            head_rect = head.get_rect(center=center)
+            overlay.blit(head, head_rect)
+        else:
+            rect = boss_rect.inflate(
+                int(boss_rect.width * 1.4 * progress),
+                int(boss_rect.height * 1.4 * progress),
+            )
+            color = (220, 70, 90, int(255 * max(0.0, 1.0 - progress)))
+            pygame.draw.rect(overlay, color, rect, border_radius=10)
+
+        self.screen.blit(overlay, (0, 0))
+
     def _draw_victory_overlay(self):
         alpha = self._victory_overlay_alpha()
         if alpha <= 0.0:
@@ -1784,14 +1842,18 @@ class Game:
         self.screen.blit(overlay, (0, 0))
 
         text_alpha = int(255 * alpha)
-        title = self.game_title_font.render("Thank you for playing", True, COLOR_HUD)
+        title = self.game_title_font.render("All growth has a price", True, COLOR_HUD)
+        thanks = self.game_font.render("Thank you for paying", True, COLOR_HUD)
         score = self.game_font.render(f"You got: {self.points}", True, COLOR_HUD)
         title.set_alpha(text_alpha)
+        thanks.set_alpha(text_alpha)
         score.set_alpha(text_alpha)
 
-        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 24))
-        score_rect = score.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 8))
+        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 42))
+        thanks_rect = thanks.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 8))
+        score_rect = score.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 24))
         self.screen.blit(title, title_rect)
+        self.screen.blit(thanks, thanks_rect)
         self.screen.blit(score, score_rect)
 
         if self.victory_phase != "name_entry":
@@ -1849,6 +1911,12 @@ class Game:
         esc_rect = esc_text.get_rect(center=(SCREEN_WIDTH // 2, box_rect.bottom + 48))
         self.screen.blit(prompt_text, prompt_rect)
         self.screen.blit(esc_text, esc_rect)
+
+        if self.story_text == self.story_end_text:
+            fire_text = self.game_font.render("Press F to fire a segment", True, COLOR_SNAKE)
+            fire_rect = fire_text.get_rect(center=(SCREEN_WIDTH // 2, box_rect.bottom + 74))
+            self.screen.blit(fire_text, fire_rect)
+
         pygame.display.flip()
 
     def draw_intro_screen(self):
@@ -2174,6 +2242,9 @@ class Game:
         if not self.snake or len(self.snake.segments) <= 2:
             return False
         return self._in_sacrifice_levels() or self._in_escape_level() or self.side_scroller_active
+
+    def _is_fire_key(self, key: int) -> bool:
+        return key == pygame.K_f
 
     def required_food_for_level(self) -> int:
         if self.level == 1:
