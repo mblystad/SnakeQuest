@@ -53,6 +53,10 @@ class Game:
         self.music_fast_sound: pygame.mixer.Sound | None = None
         self.music_channel: pygame.mixer.Channel | None = None
         self.music_speed_factor = 1.0
+        self.sound_effects: dict[str, pygame.mixer.Sound] = {}
+        self.death_fade_active = False
+        self.death_fade_started_ms: int | None = None
+        self.death_fade_duration_ms = 900
         self._init_audio()
 
         self.snake: Snake | None = None
@@ -116,6 +120,7 @@ class Game:
         self.name_max_length = 10
         self.gate_reveal_alpha = 0.0
         self.gate_reveal_speed = 540.0
+        self.gate_button_was_active = False
         self._hud_cache_key: tuple[int, int, str] | None = None
         self._hud_surfaces: dict[str, pygame.Surface] = {}
         self.leaderboard_path = Path(__file__).with_name("leaderboard.json")
@@ -175,6 +180,9 @@ class Game:
         self.victory_active = False
         self.victory_phase = "none"
         self.victory_phase_time_ms = 0.0
+        self.victory_fade_duration_ms = 2000.0
+        self.victory_shake_duration_ms = 2000.0
+        self.victory_boss_shake_px = 5
         self.victory_explosion_duration_ms = 1800.0
         self.victory_fly_duration_ms = 7000.0
         self.victory_message_fade_ms = 1800.0
@@ -253,6 +261,7 @@ class Game:
         self.input_locked = False
         self.queued_direction = None
         self.gate_reveal_alpha = 0.0
+        self.gate_button_was_active = False
         self.side_scroller_active = False
         self.escape_wall_open = False
         self.starfield = []
@@ -367,6 +376,8 @@ class Game:
         self.points = 0
         self.game_started = True
         self.game_over = False
+        self.death_fade_active = False
+        self.death_fade_started_ms = None
         self.elapsed_time_ms = 0
         self.name_input = ""
         self.score_recorded = False
@@ -400,6 +411,8 @@ class Game:
         """Restart the current level from its checkpoint."""
         self.game_started = True
         self.game_over = False
+        self.death_fade_active = False
+        self.death_fade_started_ms = None
         self.level_clear = False
         self.game_paused = False
         self.loading_active = False
@@ -486,26 +499,49 @@ class Game:
             self.wall_positions.add((GRID_WIDTH - 1, y))
 
     def _init_audio(self):
-        """Load background music if theme.wav exists, otherwise stay silent."""
+        """Load optional audio assets, otherwise stay silent."""
         try:
             if not pygame.mixer.get_init():
                 pygame.mixer.init()
         except pygame.error:
             return
 
-        music_path = Path(__file__).parent / "theme.wav"
-        if not music_path.exists():
-            return
-
         try:
-            self.music_sound = pygame.mixer.Sound(music_path)
-            self.music_fast_sound = self._build_music_variant(self.music_sound, 2.0)
-            self.music_enabled = True
-            self.music_loaded = True
+            pygame.mixer.set_num_channels(32)
         except pygame.error:
-            return
+            pass
 
-    def _build_music_variant(
+        music_path = Path(__file__).parent / "theme.wav"
+        if music_path.exists():
+            try:
+                self.music_sound = pygame.mixer.Sound(music_path)
+                self.music_fast_sound = self._build_sound_variant(self.music_sound, 2.0)
+                self.music_enabled = True
+                self.music_loaded = True
+            except pygame.error:
+                pass
+
+        eat_path = Path(__file__).parent / "eat.mp3"
+        if eat_path.exists():
+            try:
+                eat_sound = pygame.mixer.Sound(eat_path)
+                self.sound_effects["eat"] = self._build_sound_variant(eat_sound, 3.0) or eat_sound
+            except pygame.error:
+                pass
+
+        for name in ("click", "death"):
+            effect_path = Path(__file__).parent / f"{name}.mp3"
+            if not effect_path.exists():
+                continue
+            try:
+                effect_sound = pygame.mixer.Sound(effect_path)
+                if name == "click":
+                    effect_sound = self._build_sound_variant(effect_sound, 1.25) or effect_sound
+                self.sound_effects[name] = effect_sound
+            except pygame.error:
+                pass
+
+    def _build_sound_variant(
         self,
         source: pygame.mixer.Sound,
         speed_factor: float,
@@ -742,6 +778,8 @@ class Game:
 
             if event.type == pygame.KEYDOWN:
                 if self.game_over:
+                    if self.death_fade_active:
+                        continue
                     if not self.score_recorded:
                         if event.key == pygame.K_RETURN:
                             self.record_score()
@@ -1332,9 +1370,9 @@ class Game:
             return
 
         self.victory_active = True
-        self.victory_phase = "explode"
+        self.victory_phase = "fadeout"
         self.victory_phase_time_ms = 0.0
-        self.victory_particles = self._build_victory_particles()
+        self.victory_particles = []
         self.side_scroller_active = True
         self.side_scroller_camera_x = max(0.0, self.snake.head[0] - GRID_WIDTH * 0.35)
         self.name_input = ""
@@ -1383,6 +1421,22 @@ class Game:
 
         if self.victory_phase != "explode":
             self._update_starfield(dt_ms)
+
+        if self.victory_phase == "fadeout":
+            self.victory_phase_time_ms += dt_ms
+            if self.victory_phase_time_ms >= self.victory_fade_duration_ms:
+                self.victory_phase = "shake"
+                self.victory_phase_time_ms = 0.0
+            return
+
+        if self.victory_phase == "shake":
+            self.victory_phase_time_ms += dt_ms
+            if self.victory_phase_time_ms >= self.victory_shake_duration_ms:
+                self.victory_phase = "explode"
+                self.victory_phase_time_ms = 0.0
+                self.victory_particles = self._build_victory_particles()
+            return
+
         self._update_victory_particles(dt_ms)
 
         if self.victory_phase == "explode":
@@ -1506,6 +1560,8 @@ class Game:
 
     def check_food_eaten(self):
         if self.snake.head == self.food.position:
+            self.play_sound("eat")
+            self.snake.trigger_head_pop()
             self.snake.grow(1)
             self.points += 1
             self.level_food_eaten += 1
@@ -1587,6 +1643,8 @@ class Game:
         """Debug helper: jump straight to the final boss fight."""
         self.game_started = True
         self.game_over = False
+        self.death_fade_active = False
+        self.death_fade_started_ms = None
         self.level_clear = False
         self.loading_active = False
         self.story_active = False
@@ -1625,7 +1683,9 @@ class Game:
         self.spawn_food()
 
     def draw(self):
-        if self.game_over:
+        if self.game_over and self.death_fade_active:
+            self.draw_death_fade()
+        elif self.game_over:
             self.draw_game_over()
         elif not self.game_started:
             if self.menu_page == "settings":
@@ -1648,7 +1708,7 @@ class Game:
             self.draw_playfield()
             pygame.display.flip()
 
-    def draw_playfield(self):
+    def draw_playfield(self, snake_opacity: int = 255):
         self.screen.fill((0, 0, 0))
         self.screen.blit(self.background, (0, HUD_HEIGHT))
         draw_grid(self.screen, offset_y=HUD_HEIGHT)
@@ -1662,13 +1722,14 @@ class Game:
         move_interval_ms = 1000 / max(1e-6, FPS * self.speed_multiplier)
         alpha = self._movement_alpha(self.move_accumulator_ms, move_interval_ms)
         if self.snake:
-            self.snake.draw(self.screen, HUD_HEIGHT, alpha=alpha)
+            self.snake.draw(self.screen, HUD_HEIGHT, alpha=alpha, opacity=snake_opacity)
 
         self.draw_hud_band()
         self.draw_hud()
 
-    def draw_side_scroller(self, flip: bool = True):
+    def draw_side_scroller(self, flip: bool = True, snake_opacity: int = 255):
         camera_offset_px = int(round(self.side_scroller_camera_x * TILE_SIZE))
+        victory_fade = self._victory_scene_fade()
         self.screen.fill((0, 0, 0))
         self.screen.blit(self.background, (0, HUD_HEIGHT))
         if self.space_fade > 0.0:
@@ -1680,12 +1741,22 @@ class Game:
         if self.food and not self.victory_active:
             self.food.draw(self.screen, HUD_HEIGHT, offset_x_px=-camera_offset_px)
         self._draw_boss(camera_offset_px)
+        if victory_fade > 0.0:
+            self._draw_victory_scene_fade(victory_fade)
+        self._draw_defeated_boss(camera_offset_px)
         move_interval_ms = 1000 / max(1e-6, FPS * self.speed_multiplier)
         alpha = self._movement_alpha(self.move_accumulator_ms, move_interval_ms)
         if self.snake:
-            self.snake.draw(self.screen, HUD_HEIGHT, alpha=alpha, offset_x_px=-camera_offset_px)
-        self._draw_player_shots(camera_offset_px)
-        self._draw_boss_bullets(camera_offset_px)
+            self.snake.draw(
+                self.screen,
+                HUD_HEIGHT,
+                alpha=alpha,
+                offset_x_px=-camera_offset_px,
+                opacity=snake_opacity,
+            )
+        if not self.victory_active:
+            self._draw_player_shots(camera_offset_px)
+            self._draw_boss_bullets(camera_offset_px)
         self._draw_victory_boss_explosion(camera_offset_px)
         self._draw_victory_particles(camera_offset_px)
 
@@ -1695,6 +1766,24 @@ class Game:
         self._draw_victory_overlay()
         if flip:
             pygame.display.flip()
+
+    def draw_death_fade(self):
+        if self.death_fade_started_ms is None:
+            self.death_fade_started_ms = pygame.time.get_ticks()
+
+        elapsed_ms = pygame.time.get_ticks() - self.death_fade_started_ms
+        progress = min(1.0, max(0.0, elapsed_ms / max(1, self.death_fade_duration_ms)))
+        snake_opacity = int(round(255 * (1.0 - progress)))
+
+        if self.side_scroller_active:
+            self.draw_side_scroller(flip=False, snake_opacity=snake_opacity)
+        else:
+            self.draw_playfield(snake_opacity=snake_opacity)
+
+        pygame.display.flip()
+
+        if progress >= 1.0:
+            self.death_fade_active = False
 
     def _build_boss_sprite(self) -> pygame.Surface | None:
         size = (self.boss_width * TILE_SIZE, self.boss_height * TILE_SIZE)
@@ -1767,6 +1856,9 @@ class Game:
         if not self.boss_active or self.victory_active:
             return
         rect = self._boss_rect_pixels(camera_offset_px)
+        self._draw_boss_body(rect)
+
+    def _draw_boss_body(self, rect: pygame.Rect):
         if self.boss_sprite:
             self.screen.blit(self.boss_sprite, rect.topleft)
         else:
@@ -1779,6 +1871,39 @@ class Game:
             pygame.draw.rect(self.screen, (40, 20, 30), bar_rect, border_radius=4)
             fill_rect = pygame.Rect(bar_rect.left, bar_rect.top, int(bar_rect.width * hp_ratio), bar_rect.height)
             pygame.draw.rect(self.screen, (255, 120, 120), fill_rect, border_radius=4)
+
+    def _draw_defeated_boss(self, camera_offset_px: int = 0):
+        if not self.victory_active or self.victory_phase not in ("fadeout", "shake"):
+            return
+
+        rect = self._boss_rect_pixels(camera_offset_px)
+        if self.victory_phase == "shake":
+            rect = rect.move(self._victory_boss_shake_offset())
+        self._draw_boss_body(rect)
+
+    def _victory_boss_shake_offset(self) -> tuple[int, int]:
+        progress = self.victory_phase_time_ms / max(1.0, self.victory_shake_duration_ms)
+        intensity = self.victory_boss_shake_px * (0.75 + 0.25 * math.sin(progress * math.tau * 3.0))
+        x = int(round(math.sin(progress * math.tau * 18.0) * intensity))
+        y = int(round(math.sin(progress * math.tau * 23.0 + 1.2) * intensity * 0.6))
+        return x, y
+
+    def _victory_scene_fade(self) -> float:
+        if not self.victory_active:
+            return 0.0
+        if self.victory_phase == "fadeout":
+            return min(1.0, self.victory_phase_time_ms / max(1.0, self.victory_fade_duration_ms))
+        if self.victory_phase in ("shake", "explode", "flyout", "message", "name_entry"):
+            return 1.0
+        return 0.0
+
+    def _draw_victory_scene_fade(self, fade: float):
+        if fade <= 0.0:
+            return
+
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, int(255 * min(1.0, fade))))
+        self.screen.blit(overlay, (0, 0))
 
     def _boss_rect_pixels(self, camera_offset_px: int = 0) -> pygame.Rect:
         boss_x, boss_y = self.boss_pos
@@ -2038,9 +2163,15 @@ class Game:
     def _update_gate_visuals(self, dt_ms: float):
         if not self.snake or not self.key_pos or not self.button_pos:
             self.gate_reveal_alpha = 0.0
+            self.gate_button_was_active = False
             return
 
-        target_alpha = 255.0 if self._gate_button_active() else 0.0
+        button_active = self._gate_button_active()
+        if button_active and not self.gate_button_was_active:
+            self.play_sound("click")
+        self.gate_button_was_active = button_active
+
+        target_alpha = 255.0 if button_active else 0.0
         step = self.gate_reveal_speed * (dt_ms / 1000.0)
         if self.gate_reveal_alpha < target_alpha:
             self.gate_reveal_alpha = min(target_alpha, self.gate_reveal_alpha + step)
@@ -2156,12 +2287,37 @@ class Game:
         self.screen.blit(level_text, level_rect)
         self.screen.blit(time_text, time_rect)
 
-    def play_sound(self, name: str):
+    def play_sound(self, name: str) -> pygame.mixer.Channel | None:
         """Safe sound hook (no-op if audio assets are missing)."""
-        return
+        if not self.sound_on:
+            return None
+
+        sound = self.sound_effects.get(name)
+        if sound is None:
+            return None
+
+        try:
+            return sound.play()
+        except pygame.error:
+            return None
 
     def _trigger_game_over(self):
+        if self.game_over:
+            return
+
+        death_sound = self.sound_effects.get("death")
+        if death_sound is not None:
+            try:
+                self.death_fade_duration_ms = max(
+                    500,
+                    int(death_sound.get_length() * 1000),
+                )
+            except pygame.error:
+                self.death_fade_duration_ms = 900
+
         self.play_sound("death")
+        self.death_fade_active = True
+        self.death_fade_started_ms = pygame.time.get_ticks()
         self.game_over = True
         self.game_started = False
         self.game_paused = False
@@ -2969,7 +3125,7 @@ class Game:
         if self.key_pos:
             self.draw_key()
         if self.snake:
-            self.snake.draw(self.screen, HUD_HEIGHT, alpha=0.0)
+            self.snake.draw(self.screen, HUD_HEIGHT, alpha=0.0, opacity=0)
 
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 170))

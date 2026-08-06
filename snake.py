@@ -34,6 +34,9 @@ class Snake:
         # Each entry: {"index_from_tail": int, "alpha": int}
         self.fading_segments = []
         self.fade_speed = 40  # Alpha increase per update
+        self.head_pop_started_ms: int | None = None
+        self.head_pop_duration_ms = 420
+        self.head_pop_scale = 1.25
 
     def _create_head_frames(self):
         """Create simple placeholder frames for a chew animation."""
@@ -137,6 +140,9 @@ class Snake:
         if self.segments:
             self.fading_segments.append({"index_from_tail": 0, "alpha": 0})
 
+    def trigger_head_pop(self):
+        self.head_pop_started_ms = pygame.time.get_ticks()
+
     def update(self):
         """Move the snake and update animations."""
         self.prev_segments = list(self.segments)
@@ -182,7 +188,9 @@ class Snake:
         offset_y: int = 0,
         alpha: float = 0.0,
         offset_x_px: int = 0,
+        opacity: int = 255,
     ):
+        opacity = max(0, min(255, int(opacity)))
         if not self.interp_ready:
             alpha = 0.0
         else:
@@ -195,7 +203,7 @@ class Snake:
         )
         positions = positions[: len(self.segments)]
         if len(positions) > 1:
-            self._draw_connectors(surface, positions, offset_y, offset_x_px)
+            self._draw_connectors(surface, positions, offset_y, offset_x_px, opacity)
         for index, (x, y) in enumerate(positions):
             dest = (int(x * TILE_SIZE + offset_x_px), int(y * TILE_SIZE + offset_y))
 
@@ -207,7 +215,8 @@ class Snake:
                 head_dir = self._head_direction_for_alpha(alpha)
                 angle = self._direction_to_angle(head_dir)
                 oriented = self._rotated_head(angle, frame)
-                self._blit_with_fade(surface, oriented, dest, fade_alpha)
+                oriented, dest = self._scale_head_for_pop(oriented, dest)
+                self._blit_with_fade(surface, oriented, dest, fade_alpha, opacity)
             elif index == len(self.segments) - 1:
                 # Tail pointing toward previous segment
                 cur_x, cur_y = positions[index]
@@ -215,7 +224,7 @@ class Snake:
                 dx, dy = cur_x - prev_x, cur_y - prev_y
                 angle = self._direction_to_angle(self._axis_direction(dx, dy))
                 oriented = self._rotated_body("tail", angle)
-                self._blit_with_fade(surface, oriented, dest, fade_alpha)
+                self._blit_with_fade(surface, oriented, dest, fade_alpha, opacity)
             else:
                 corner_angle = self._corner_angle_from_positions(positions, index)
                 if corner_angle is not None and self.corner_image is not None:
@@ -224,7 +233,7 @@ class Snake:
                     angle = self._body_angle_from_positions(positions, index)
                     cache_key = "throat" if index == 1 else "body"
                     oriented = self._rotated_body(cache_key, angle)
-                self._blit_with_fade(surface, oriented, dest, fade_alpha)
+                self._blit_with_fade(surface, oriented, dest, fade_alpha, opacity)
 
     def _interpolated_positions(self, alpha: float) -> list[tuple[float, float]]:
         current = list(self.segments)
@@ -242,13 +251,51 @@ class Snake:
             interpolated.append((ix, iy))
         return interpolated
 
-    def _blit_with_fade(self, surface: pygame.Surface, image: pygame.Surface, dest, fade_alpha: int | None):
+    def _blit_with_fade(
+        self,
+        surface: pygame.Surface,
+        image: pygame.Surface,
+        dest,
+        fade_alpha: int | None,
+        opacity: int = 255,
+    ):
+        final_alpha = opacity
         if fade_alpha is not None:
+            final_alpha = min(final_alpha, fade_alpha)
+
+        if final_alpha <= 0:
+            return
+
+        if final_alpha < 255:
             faded = image.copy()
-            faded.set_alpha(fade_alpha)
+            faded.set_alpha(final_alpha)
             surface.blit(faded, dest)
-        else:
-            surface.blit(image, dest)
+            return
+
+        surface.blit(image, dest)
+
+    def _scale_head_for_pop(self, image: pygame.Surface, dest: tuple[int, int]):
+        scale = self._head_pop_current_scale()
+        if scale <= 1.001:
+            return image, dest
+
+        width, height = image.get_size()
+        scaled_size = (max(1, int(round(width * scale))), max(1, int(round(height * scale))))
+        scaled = pygame.transform.smoothscale(image, scaled_size)
+        rect = scaled.get_rect(center=(dest[0] + width // 2, dest[1] + height // 2))
+        return scaled, rect.topleft
+
+    def _head_pop_current_scale(self) -> float:
+        if self.head_pop_started_ms is None:
+            return 1.0
+
+        elapsed_ms = pygame.time.get_ticks() - self.head_pop_started_ms
+        if elapsed_ms >= self.head_pop_duration_ms:
+            self.head_pop_started_ms = None
+            return 1.0
+
+        progress = max(0.0, min(1.0, elapsed_ms / max(1, self.head_pop_duration_ms)))
+        return 1.0 + (self.head_pop_scale - 1.0) * (1.0 - progress)
 
     def _fade_lookup_by_index(self) -> dict[int, int]:
         fade_lookup: dict[int, int] = {}
@@ -435,10 +482,13 @@ class Snake:
         positions: list[tuple[float, float]],
         offset_y: int,
         offset_x_px: int = 0,
+        opacity: int = 255,
     ):
         half = TILE_SIZE / 2
         thickness = self.connector_thickness
         radius = self.connector_radius
+        if opacity <= 0:
+            return
         for index in range(1, len(positions)):
             x1, y1 = positions[index - 1]
             x2, y2 = positions[index]
@@ -462,4 +512,14 @@ class Snake:
 
             rect = pygame.Rect(0, 0, int(round(width)), int(round(height)))
             rect.center = (int(round((cx1 + cx2) / 2)), int(round((cy1 + cy2) / 2)))
-            pygame.draw.rect(surface, COLOR_SNAKE, rect, border_radius=radius)
+            if opacity >= 255:
+                pygame.draw.rect(surface, COLOR_SNAKE, rect, border_radius=radius)
+            else:
+                connector = pygame.Surface(rect.size, pygame.SRCALPHA)
+                pygame.draw.rect(
+                    connector,
+                    (*COLOR_SNAKE, opacity),
+                    connector.get_rect(),
+                    border_radius=radius,
+                )
+                surface.blit(connector, rect.topleft)

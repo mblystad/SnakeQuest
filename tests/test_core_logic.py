@@ -58,6 +58,29 @@ class CoreLogicTests(unittest.TestCase):
 
         self.assertTrue(game._victory_snake_has_left_screen())
 
+    def test_victory_sequence_fades_then_shakes_before_explosion(self):
+        game = Game()
+        game.snake = Snake()
+        game.snake.segments = [(20, 5), (19, 5), (18, 5)]
+        game.boss_pos = (28.0, 10.0)
+
+        game._start_victory_sequence()
+
+        self.assertEqual(game.victory_phase, "fadeout")
+        self.assertEqual(game.victory_particles, [])
+        self.assertEqual(game._victory_scene_fade(), 0.0)
+
+        game._update_victory(game.victory_fade_duration_ms)
+
+        self.assertEqual(game.victory_phase, "shake")
+        self.assertEqual(game.victory_particles, [])
+        self.assertEqual(game._victory_scene_fade(), 1.0)
+
+        game._update_victory(game.victory_shake_duration_ms)
+
+        self.assertEqual(game.victory_phase, "explode")
+        self.assertTrue(game.victory_particles)
+
     def test_skip_escape_level_does_not_show_final_story(self):
         game = Game()
         game.game_started = True

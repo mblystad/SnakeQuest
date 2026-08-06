@@ -45,6 +45,9 @@ The game will load these files if they exist in the project root:
 - `key.png` (key sprite)
 - `head.png`, `segment.png`, `tail.png`, `throat.png` (snake parts)
 - `theme.wav` (music)
+- `eat.mp3` (food pickup sound)
+- `click.mp3` (gate button sound)
+- `death.mp3` (death sound)
 - `Vipnagorgialla_Bd.otf`, `Vipnagorgialla_Rg.otf` (menu/game fonts)
 
 Missing assets fall back to simple shapes/colors.
