@@ -21,6 +21,5 @@
 
 ## Cleanup Backlog
 - Split `game.py` into scene/state, level layout, audio, leaderboard, and rendering modules once behavior is stable.
-- Move root assets into an `assets/` directory after confirming all load paths still use `ASSET_SEARCH_DIRS`.
 - Add display-free unit tests for pure layout/progression rules as they are extracted.
 - Add a short manual QA checklist for release playthroughs.

@@ -14,15 +14,15 @@ SnekQuest is an AI-assisted Snake clone built with pygame-ce. It adds a gates-an
 
 ### Menu
 
-![SnekQuest menu](menu.png)
+![SnekQuest menu](docs/screenshots/menu.png)
 
 ### Gameplay
 
-![SnekQuest gameplay](gameplay.png)
+![SnekQuest gameplay](docs/screenshots/gameplay.png)
 
 ### Background artwork
 
-![SnekQuest background](bg1.png)
+![SnekQuest background](docs/screenshots/bg1.png)
 
 ## Credits and AI disclosure
 
@@ -34,7 +34,7 @@ SnekQuest is a clone of the classic Snake game, with additional gameplay feature
 - Gates & keys mechanic to advance levels after collecting enough food.
 - Animated level-loading sequence plus a Level Clear pause between stages.
 - HUD for score/level/time with custom font support.
-- Optional art and music assets if files are present in the project root.
+- Optional art and sound assets from `assets/`, with graceful fallbacks when files are missing.
 
 ## Requirements
 - Python 3.10+
@@ -66,30 +66,33 @@ python main.py
 - Stored in `leaderboard.json` (auto-created on the first game over).
 - If you skip name entry, the game saves `Snake####` automatically.
 
-## Assets (optional)
-The game will load these files if they exist in the project root:
-- `menubg.png` (menu background)
-- `banner.png` (HUD banner)
-- `key.png` (key sprite)
-- `head.png`, `segment.png`, `tail.png`, `throat.png` (snake parts)
-- `theme.wav` (music)
-- `eat.mp3` (food pickup sound)
-- `click.mp3` (gate button sound)
-- `death.mp3` (death sound)
-- `Vipnagorgialla_Bd.otf`, `Vipnagorgialla_Rg.otf` (menu/game fonts)
+## Assets
 
-Missing assets fall back to simple shapes/colors.
+Optional runtime artwork, fonts, and sounds live in `assets/`. The game falls back to shapes, system fonts, or silence when an asset is absent. Menu/game backgrounds and sprites, IDMG's music and snake sprite, and royalty-free sound effects are bundled there.
 
 ## Project layout
-- `main.py` entry point.
-- `game.py`, `snake.py`, `food.py`, `grid.py`, `config.py` core logic and rendering.
-- `tests/` lightweight desktop logic tests.
+- `main.py` entry point; `game.py`, `snake.py`, `food.py`, `grid.py`, and `config.py` contain the game logic.
+- `assets/` optional runtime art, fonts, and audio. Missing assets use built-in fallbacks.
+- `docs/screenshots/` README screenshots; `docs/FINISHING_PLAN.md` development checklist.
+- `tests/` lightweight display-free logic tests.
+- `SnekQuest.spec` PyInstaller recipe for building the Windows release folder.
+
+## Build a Windows release
+
+Install Python 3.10+ and pygame-ce, then install PyInstaller and build from the repository root:
+
+```bash
+python -m pip install pygame-ce pyinstaller
+pyinstaller --noconfirm SnekQuest.spec
+```
+
+The playable folder is created at `dist/SnekQuest/`. Zip the entire folder for itch.io; keep generated `build/` and `dist/` output out of GitHub.
 
 ## Finish Checklist
 - Play through every level group at each speed setting: normal gates, Tetris arenas, sacrifice arenas, escape, and final boss.
 - Tune required food, arena spacing, ammo, and boss health from observed playthrough time instead of guessing in code.
 - Replace placeholder/fallback visuals only where they improve readability. Missing assets must remain non-fatal.
-- Keep the desktop pygame version as the source of truth. Any future mobile port should live in a separate branch or package.
+- The desktop pygame version is the source of truth.
 
 ## License
 

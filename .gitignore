@@ -31,7 +31,8 @@ MANIFEST
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 # Keep the app's explicit PyInstaller build recipe under version control.
-android dist/
+# Local game data
+leaderboard.json
 
 # Installer logs
 pip-log.txt

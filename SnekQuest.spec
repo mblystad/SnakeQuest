@@ -5,7 +5,12 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('menubg.png', '.'), ('menubg2.png', '.'), ('banner.png', '.'), ('button1.png', '.'), ('gate.png', '.'), ('heart.png', '.'), ('head.png', '.'), ('segment.png', '.'), ('tail.png', '.'), ('throat.png', '.'), ('corner.png', '.'), ('snakebug.png', '.'), ('f1.png', '.'), ('IDMGlogo.png', '.'), ('theme.wav', '.'), ('jump.mp3', '.'), ('eat.mp3', '.'), ('click.mp3', '.'), ('death.mp3', '.'), ('Vipnagorgialla_Bd.otf', '.')],
+    datas=[(f'assets/{name}', 'assets') for name in (
+        'menubg.png', 'menubg2.png', 'banner.png', 'button1.png', 'gate.png',
+        'heart.png', 'head.png', 'segment.png', 'tail.png', 'throat.png',
+        'corner.png', 'f1.png', 'IDMGlogo.png', 'theme.wav', 'jump.mp3',
+        'eat.mp3', 'click.mp3', 'death.mp3', 'Vipnagorgialla_Bd.otf',
+    )],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -20,7 +25,7 @@ exe = EXE(
     pyz,
     a.scripts,
     [],
-    name='SnakeQuest',
+    name='SnekQuest',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -33,7 +38,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['head.ico'],
+    icon=['assets/head.ico'],
 )
 
 coll = COLLECT(
@@ -43,6 +48,6 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='SnakeQuest',
+    name='SnekQuest',
     distpath='dist',
 )

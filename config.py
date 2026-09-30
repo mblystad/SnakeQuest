@@ -32,7 +32,7 @@ PROJECT_DIR = Path(__file__).parent
 ASSET_DIR = PROJECT_DIR / "assets"
 FALLBACK_ASSET_DIR = PROJECT_DIR
 PACKAGED_DIR = Path(getattr(sys, "_MEIPASS", PROJECT_DIR))
-ASSET_SEARCH_DIRS = tuple(dict.fromkeys((ASSET_DIR, FALLBACK_ASSET_DIR, PACKAGED_DIR)))
+ASSET_SEARCH_DIRS = tuple(dict.fromkeys((ASSET_DIR, FALLBACK_ASSET_DIR, PACKAGED_DIR / "assets", PACKAGED_DIR)))
 
 PIXEL_FONT_FILES = (
     "PressStart2P-Regular.ttf",

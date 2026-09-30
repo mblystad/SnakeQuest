@@ -1,6 +1,6 @@
 # agents.md — SnekQuest (pygame-ce)
 
-This repository is a small, single-folder pygame-ce project: a Snake clone with **menus**, **settings (speed + sound)**, **HUD**, and a **gates & keys** level progression mechanic. It also supports **optional assets** (images/fonts/audio) that must never be required to run.
+This repository is a compact pygame-ce project: a Snake clone with **menus**, **settings (speed + sound)**, **HUD**, and a **gates & keys** level progression mechanic. Optional images, fonts, and audio live in `assets/` and must never be required to run.
 
 This file is instructions for coding agents (Copilot, Claude Code, Cursor, etc.). If you are an agent, follow these rules before editing anything.
 
@@ -18,10 +18,12 @@ This file is instructions for coding agents (Copilot, Claude Code, Cursor, etc.)
   - Game over → return to menu
 - **No new runtime dependencies** unless explicitly requested.
 
-Repo overview (current files in the root):
+Repo overview:
 - `main.py` (entry point)
 - `game.py`, `snake.py`, `food.py`, `grid.py`, `config.py` (core logic)
-- Optional assets present in repo: `menubg.png`, `banner.png`, `head.png`, `segment.png`, `tail.png`, `throat.png`, `theme.wav`, `Vipnagorgialla_Bd.otf` citeturn1view0
+- `assets/` (optional images, fonts, and audio)
+- `docs/screenshots/` (README screenshots)
+- `tests/` (lightweight desktop logic tests)
 
 ---
 
