@@ -11,7 +11,7 @@ def main() -> None:
     except ImportError:
         audioop = None
 
-    from config import ASSET_DIR, FALLBACK_ASSET_DIR, SCREEN_HEIGHT, SCREEN_WIDTH
+    from config import ASSET_DIR, FALLBACK_ASSET_DIR, PACKAGED_DIR, SCREEN_HEIGHT, SCREEN_WIDTH
     from game import Game
 
     SPLASH_LOGO_FILE = "IDMGlogo.png"
@@ -25,7 +25,7 @@ def main() -> None:
     SPLASH_ENABLED = os.environ.get("SNAKEQUEST_SKIP_SPLASH", "0") != "1"
 
     def find_asset_path(filename: str) -> Path | None:
-        for base_dir in (ASSET_DIR, FALLBACK_ASSET_DIR):
+        for base_dir in (ASSET_DIR, FALLBACK_ASSET_DIR, PACKAGED_DIR):
             path = base_dir / filename
             if path.exists():
                 return path

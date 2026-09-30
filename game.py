@@ -10,6 +10,7 @@ from config import (
     HUD_HEIGHT, PLAYFIELD_HEIGHT,
     COLOR_BUTTON, COLOR_KEY, COLOR_HUD, COLOR_WALL, COLOR_SNAKE,
     MENU_FONT_FILE, UI_FONT_FILE, load_custom_font,
+    ASSET_SEARCH_DIRS,
 )
 from grid import draw_grid, build_background
 from snake import Snake
@@ -170,10 +171,10 @@ class Game:
         self.boss_width = 3
         self.boss_height = 4
         self.boss_target_x = GRID_WIDTH - self.boss_width - 2
-        self.boss_fire_interval_ms = 1200
+        self.boss_fire_interval_ms = 1500
         self.boss_fire_timer_ms = 0.0
         self.boss_bullets: list[dict] = []
-        self.boss_bullet_speed = 9.5
+        self.boss_bullet_speed = 8.0
         self.boss_bullet_radius = max(2, int(TILE_SIZE * 0.25))
         self.boss_state = "hidden"
         self.boss_sprite = self._build_boss_sprite()
@@ -511,8 +512,8 @@ class Game:
         except pygame.error:
             pass
 
-        music_path = Path(__file__).parent / "theme.wav"
-        if music_path.exists():
+        music_path = next((base / "theme.wav" for base in ASSET_SEARCH_DIRS if (base / "theme.wav").exists()), None)
+        if music_path is not None:
             try:
                 self.music_sound = pygame.mixer.Sound(music_path)
                 self.music_fast_sound = self._build_sound_variant(self.music_sound, 2.0)
@@ -521,8 +522,8 @@ class Game:
             except pygame.error:
                 pass
 
-        eat_path = Path(__file__).parent / "eat.mp3"
-        if eat_path.exists():
+        eat_path = next((base / "eat.mp3" for base in ASSET_SEARCH_DIRS if (base / "eat.mp3").exists()), None)
+        if eat_path is not None:
             try:
                 eat_sound = pygame.mixer.Sound(eat_path)
                 self.sound_effects["eat"] = self._build_sound_variant(eat_sound, 3.0) or eat_sound
@@ -530,8 +531,8 @@ class Game:
                 pass
 
         for name in ("click", "death"):
-            effect_path = Path(__file__).parent / f"{name}.mp3"
-            if not effect_path.exists():
+            effect_path = next((base / f"{name}.mp3" for base in ASSET_SEARCH_DIRS if (base / f"{name}.mp3").exists()), None)
+            if effect_path is None:
                 continue
             try:
                 effect_sound = pygame.mixer.Sound(effect_path)
@@ -960,7 +961,7 @@ class Game:
             self.last_frame_ms = now_ms
         dt_ms = now_ms - self.last_frame_ms
         self.last_frame_ms = now_ms
-        dt_ms = min(dt_ms, 200)
+        dt_ms = min(max(0, dt_ms), 1000)
 
         if self.victory_active:
             self._update_victory(dt_ms)
@@ -980,16 +981,13 @@ class Game:
         self.move_accumulator_ms += dt_ms
         self._update_sacrifice_shot(dt_ms)
         updates = 0
-        max_updates = 5
+        max_updates = 15
         while self.move_accumulator_ms >= move_interval_ms and not self.game_over:
             self.move_accumulator_ms -= move_interval_ms
+            self._apply_queued_direction()
             self.snake.update()
             self.elapsed_time_ms += move_interval_ms
             self.input_locked = False
-            if self.queued_direction:
-                if self._direction_valid(self.queued_direction, self.snake.direction):
-                    self.snake.set_direction(self.queued_direction)
-                self.queued_direction = None
             self.check_collisions()
             if self.game_over:
                 break
@@ -1007,7 +1005,7 @@ class Game:
             self.story_last_frame_ms = now_ms
         dt_ms = now_ms - self.story_last_frame_ms
         self.story_last_frame_ms = now_ms
-        dt_ms = min(dt_ms, 200)
+        dt_ms = min(max(0, dt_ms), 1000)
         dt_ms = min(dt_ms, self.story_move_interval_ms)
 
         self.story_move_accumulator_ms += dt_ms
@@ -1027,7 +1025,7 @@ class Game:
             self.intro_last_frame_ms = now_ms
         dt_ms = now_ms - self.intro_last_frame_ms
         self.intro_last_frame_ms = now_ms
-        dt_ms = min(dt_ms, 200)
+        dt_ms = min(max(0, dt_ms), 1000)
         dt_ms = min(dt_ms, self.intro_move_interval_ms)
 
         self.intro_move_accumulator_ms += dt_ms
@@ -1056,24 +1054,23 @@ class Game:
             return
         self._update_boss_bullets(dt_ms)
 
+        dt_ms = min(max(0, dt_ms), 1000)
         move_interval_ms = 1000 / max(1e-6, FPS * self.speed_multiplier)
         self.move_accumulator_ms += dt_ms
         updates = 0
-        max_updates = 5
+        max_updates = 15
         while self.move_accumulator_ms >= move_interval_ms and not self.game_over:
             self.move_accumulator_ms -= move_interval_ms
             self.elapsed_time_ms += move_interval_ms
+            self._apply_queued_direction()
             self.input_locked = False
-            if self.queued_direction:
-                if self._direction_valid(self.queued_direction, self.snake.direction):
-                    self.snake.set_direction(self.queued_direction)
-                self.queued_direction = None
 
             head_x, _ = self.snake.head
             if self.snake.pending_direction == (-1, 0) and head_x <= self.side_scroller_left_lock:
                 updates += 1
                 if updates >= max_updates:
                     self.move_accumulator_ms = 0.0
+                    break
                 continue
 
             self.snake.update()
@@ -1489,7 +1486,7 @@ class Game:
         move_interval_ms = 1000 / max(1e-6, FPS * self.speed_multiplier)
         self.move_accumulator_ms += dt_ms
         updates = 0
-        max_updates = 6
+        max_updates = 15
         while self.move_accumulator_ms >= move_interval_ms:
             self.move_accumulator_ms -= move_interval_ms
             self.elapsed_time_ms += move_interval_ms
@@ -2401,6 +2398,8 @@ class Game:
     def queue_direction(self, new_dir: tuple[int, int]):
         if not self.snake:
             return
+        if new_dir not in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            return
         if new_dir == self.snake.pending_direction:
             return
 
@@ -2411,8 +2410,22 @@ class Game:
                 self.queued_direction = None
             return
 
-        if self._direction_valid(new_dir, self.snake.pending_direction):
+        # Keep the first legal turn queued for the next movement tick. Extra
+        # key presses before that tick must not overwrite it.
+        if self.queued_direction is None and self._direction_valid(
+            new_dir, self.snake.direction
+        ):
             self.queued_direction = new_dir
+
+    def _apply_queued_direction(self):
+        """Apply one buffered legal turn immediately before a grid step."""
+        if not self.snake:
+            self.queued_direction = None
+            return
+        if self.queued_direction is not None:
+            if self._direction_valid(self.queued_direction, self.snake.direction):
+                self.snake.set_direction(self.queued_direction)
+            self.queued_direction = None
 
     def _can_shoot(self) -> bool:
         if not self.snake or len(self.snake.segments) <= 2:
