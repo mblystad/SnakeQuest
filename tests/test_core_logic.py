@@ -46,6 +46,24 @@ class CoreLogicTests(unittest.TestCase):
         self.assertTrue(game._is_fire_key(pygame.K_f))
         self.assertFalse(game._is_fire_key(pygame.K_s))
 
+    def test_game_over_speed_change_and_replay_keep_level_checkpoint(self):
+        game = Game()
+        game.game_started = True
+        game.level = 4
+        game.level_start_points = 12
+        game.level_start_time_ms = 34000
+        game.points = 15
+        game.elapsed_time_ms = 41000
+
+        game._adjust_speed(-1)
+        game.replay_level()
+
+        self.assertEqual(game.level, 4)
+        self.assertEqual(game.speed_options[game.speed_index][0], "Slow")
+        self.assertEqual(game.points, 12)
+        self.assertEqual(game.elapsed_time_ms, 34000)
+        self.assertTrue(game.loading_active)
+
     def test_victory_flyout_waits_for_snake_to_leave_screen(self):
         game = Game()
         game.snake = Snake()

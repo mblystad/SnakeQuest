@@ -32,11 +32,11 @@ class Game:
         ("L", [(0, 0), (0, 1), (0, 2), (1, 2)]),
         ("J", [(1, 0), (1, 1), (1, 2), (0, 2)]),
     ]
-    FRAME_RATE_CAP = 120
+    FRAME_RATE_CAP = 240
 
     def __init__(self):
         pygame.init()
-        pygame.display.set_caption("Snake Quest - Gates & Keys")
+        pygame.display.set_caption("SnekQuest - Gates & Keys")
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
         self.clock = pygame.time.Clock()
         self.running = True
@@ -781,12 +781,29 @@ class Game:
                 if self.game_over:
                     if self.death_fade_active:
                         continue
+                    if event.key in (pygame.K_LEFT, pygame.K_a):
+                        self._adjust_speed(-1)
+                        continue
+                    if event.key in (pygame.K_RIGHT, pygame.K_d):
+                        self._adjust_speed(1)
+                        continue
+                    if event.key in (pygame.K_1, pygame.K_KP1):
+                        self._set_speed(0)
+                        continue
+                    if event.key in (pygame.K_2, pygame.K_KP2):
+                        self._set_speed(1)
+                        continue
+                    if event.key in (pygame.K_3, pygame.K_KP3):
+                        self._set_speed(2)
+                        continue
+                    # Retry is deliberately available before entering a score,
+                    # so a player can adjust speed without losing the checkpoint.
+                    if event.key == pygame.K_SPACE:
+                        self.replay_level()
+                        continue
                     if not self.score_recorded:
                         if event.key == pygame.K_RETURN:
                             self.record_score()
-                        elif event.key == pygame.K_SPACE:
-                            self.record_score()
-                            self.replay_level()
                         elif event.key == pygame.K_BACKSPACE:
                             self.name_input = self.name_input[:-1]
                         elif event.key == pygame.K_ESCAPE:
@@ -795,11 +812,8 @@ class Game:
                             if event.unicode and event.unicode.isalnum():
                                 if len(self.name_input) < self.name_max_length:
                                     self.name_input += event.unicode
-                    else:
-                        if event.key == pygame.K_SPACE:
-                            self.replay_level()
-                        elif event.key == pygame.K_ESCAPE:
-                            self.exit_to_menu()
+                    elif event.key == pygame.K_ESCAPE:
+                        self.exit_to_menu()
                     continue
 
                 if event.key == pygame.K_q:
@@ -2362,8 +2376,9 @@ class Game:
     def _movement_alpha(self, accumulator_ms: float, interval_ms: float) -> float:
         if interval_ms <= 0:
             return 1.0
-        raw = min(1.0, max(0.0, accumulator_ms / interval_ms))
-        return self._ease_out_alpha(raw)
+        # Movement remains discrete for game logic, while rendering advances
+        # at a steady rate between cell centers for smooth visual motion.
+        return min(1.0, max(0.0, accumulator_ms / interval_ms))
 
     def _wrap_story_text(self, text: str, max_width: int) -> list[str]:
         if max_width <= 0:
@@ -2395,6 +2410,17 @@ class Game:
             return False
         return True
 
+    def _set_speed(self, index: int):
+        if not self.speed_options:
+            return
+        self.speed_index = max(0, min(len(self.speed_options) - 1, index))
+        self.speed_multiplier = self.speed_options[self.speed_index][1]
+
+    def _adjust_speed(self, step: int):
+        if not self.speed_options:
+            return
+        self._set_speed((self.speed_index + step) % len(self.speed_options))
+
     def queue_direction(self, new_dir: tuple[int, int]):
         if not self.snake:
             return
@@ -2412,8 +2438,9 @@ class Game:
 
         # Keep the first legal turn queued for the next movement tick. Extra
         # key presses before that tick must not overwrite it.
+        queued_heading = self.queued_direction or self.snake.pending_direction
         if self.queued_direction is None and self._direction_valid(
-            new_dir, self.snake.direction
+            new_dir, queued_heading
         ):
             self.queued_direction = new_dir
 
@@ -3145,29 +3172,33 @@ class Game:
         self.screen.blit(overlay, (0, 0))
 
         title_text = self.game_title_font.render("Game Over", True, COLOR_HUD)
-        if not self.score_recorded:
-            prompt_label = "Replay level? SPACE | ENTER to save | ESC to menu"
-        else:
-            prompt_label = "Replay level? SPACE | ESC to menu"
+        prompt_label = "Change speed: LEFT/RIGHT or 1/2/3"
         prompt_text = self.game_font.render(prompt_label, True, COLOR_HUD)
 
         title_rect = title_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 20))
-        prompt_rect = prompt_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 20))
+        prompt_rect = prompt_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 14))
+        retry_text = self.game_font.render(
+            f"Speed: {self.speed_options[self.speed_index][0]} | SPACE: retry | ESC: menu",
+            True,
+            COLOR_HUD,
+        )
+        retry_rect = retry_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 44))
         self.screen.blit(title_text, title_rect)
         self.screen.blit(prompt_text, prompt_rect)
+        self.screen.blit(retry_text, retry_rect)
 
         if not self.score_recorded:
             name_display = self.name_input if self.name_input else "_"
             name_text = self.menu_option_font.render(f"Name: {name_display}", True, COLOR_HUD)
-            name_rect = name_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 60))
+            name_rect = name_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 78))
             self.screen.blit(name_text, name_rect)
 
             hint_text = self.menu_prompt_font.render(
-                "Type your name, ENTER to save, SPACE to replay level",
+                "Type name + ENTER to save score",
                 True,
                 COLOR_HUD,
             )
-            hint_rect = hint_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 92))
+            hint_rect = hint_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 108))
             self.screen.blit(hint_text, hint_rect)
         pygame.display.flip()
 

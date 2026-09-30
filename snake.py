@@ -205,7 +205,7 @@ class Snake:
         if len(positions) > 1:
             self._draw_connectors(surface, positions, offset_y, offset_x_px, opacity)
         for index, (x, y) in enumerate(positions):
-            dest = (int(x * TILE_SIZE + offset_x_px), int(y * TILE_SIZE + offset_y))
+            dest = (round(x * TILE_SIZE + offset_x_px), round(y * TILE_SIZE + offset_y))
 
             fade_alpha = fade_lookup.get(index)
 
@@ -511,7 +511,7 @@ class Snake:
                 height = abs(dy) + overlap
 
             rect = pygame.Rect(0, 0, int(round(width)), int(round(height)))
-            rect.center = (int(round((cx1 + cx2) / 2)), int(round((cy1 + cy2) / 2)))
+            rect.center = (round((cx1 + cx2) / 2), round((cy1 + cy2) / 2))
             if opacity >= 255:
                 pygame.draw.rect(surface, COLOR_SNAKE, rect, border_radius=radius)
             else:

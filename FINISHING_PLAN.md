@@ -1,4 +1,4 @@
-# SnakeQuest Finishing Plan
+# SnekQuest Finishing Plan
 
 ## Current Shape
 - The active game is a desktop `pygame-ce` project launched with `python main.py`.

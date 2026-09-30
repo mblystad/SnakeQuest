@@ -1,4 +1,4 @@
-# agents.md — SnakeQuest (pygame-ce)
+# agents.md — SnekQuest (pygame-ce)
 
 This repository is a small, single-folder pygame-ce project: a Snake clone with **menus**, **settings (speed + sound)**, **HUD**, and a **gates & keys** level progression mechanic. It also supports **optional assets** (images/fonts/audio) that must never be required to run.
 
